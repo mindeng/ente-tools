@@ -172,6 +172,23 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 					fileLastSyncTime = file.UpdationTime
 				}
 
+				// Check if file is removed from album (deleted)
+				// ente uses either IsDeleted=true or File.EncryptedData="-" to mark deleted files
+				isRemoved := file.IsDeleted || file.File.EncryptedData == "-"
+
+				// On first sync, skip deleted files (no need to sync delete markers)
+				if lastSyncTime == 0 && isRemoved {
+					continue
+				}
+
+				// For deleted files, mark as deleted in DB
+				if isRemoved {
+					if err := db.MarkFileAsDeleted(file.ID); err != nil {
+						result.Errors = append(result.Errors, fmt.Errorf("failed to mark file %d as deleted: %w", file.ID, err))
+					}
+					continue
+				}
+
 				// Decrypt file metadata
 				decryptedFile, err := DecryptFile(file, collectionKey)
 				if err != nil {

@@ -288,6 +288,12 @@ func (d *Database) MarkCollectionAsDeleted(collectionID int64) error {
 	return err
 }
 
+// MarkFileAsDeleted marks a file as deleted
+func (d *Database) MarkFileAsDeleted(fileID int64) error {
+	_, err := d.db.Exec("UPDATE files SET is_deleted = TRUE WHERE id = ?", fileID)
+	return err
+}
+
 // GetCollections retrieves all collections
 func (d *Database) GetCollections() ([]DecryptedCollection, error) {
 	query := `
