@@ -106,20 +106,33 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 			continue
 		}
 
+		// Get collection key first (needed to decrypt name)
+		collectionKey, err := GetCollectionKey(coll, opts.AccountSecret.MasterKey, opts.AccountSecret.SecretKey, opts.AccountSecret.PublicKey, targetAccount.UserID)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("failed to get collection key for collection %d: %w", coll.ID, err))
+			continue
+		}
+
 		// Decrypt collection name
-		collName, err := DecryptCollectionName(coll, opts.AccountSecret.MasterKey)
+		collName, err := DecryptCollectionName(coll, collectionKey)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("failed to decrypt collection %d: %w", coll.ID, err))
 			continue
 		}
 
+		// Check if shared
+		isShared := coll.Owner.ID != targetAccount.UserID
+
 		decryptedColl := DecryptedCollection{
-			ID:         coll.ID,
-			OwnerID:    coll.Owner.ID,
-			Name:       collName,
-			IsShared:   coll.IsShared,
-			IsDeleted:  coll.IsDeleted,
-			UpdatedTime: time.UnixMicro(coll.UpdatedTime),
+			ID:                 coll.ID,
+			OwnerID:            coll.Owner.ID,
+			Name:               collName,
+			Type:               coll.Type,
+			IsShared:           isShared,
+			IsDeleted:          coll.IsDeleted,
+			UpdatedTime:        time.UnixMicro(coll.UpdatedTime),
+			EncryptedKey:       coll.EncryptedKey,
+			KeyDecryptionNonce: coll.KeyDecryptionNonce,
 		}
 
 		// If collection is deleted, mark as deleted in DB
@@ -127,13 +140,6 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 			if err := db.MarkCollectionAsDeleted(coll.ID); err != nil {
 				result.Errors = append(result.Errors, fmt.Errorf("failed to mark collection %d as deleted: %w", coll.ID, err))
 			}
-			continue
-		}
-
-		// Get collection key
-		collectionKey, err := GetCollectionKey(coll, opts.AccountSecret.MasterKey, opts.AccountSecret.SecretKey, opts.AccountSecret.PublicKey, targetAccount.UserID)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("failed to get collection key for %s: %w", collName, err))
 			continue
 		}
 
@@ -162,8 +168,8 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 			// Process files
 			for _, file := range files {
 				// Update last sync time
-				if file.LastUpdateTime > fileLastSyncTime {
-					fileLastSyncTime = file.LastUpdateTime
+				if file.UpdationTime > fileLastSyncTime {
+					fileLastSyncTime = file.UpdationTime
 				}
 
 				// Decrypt file metadata
@@ -251,20 +257,33 @@ func ListCollections(ctx context.Context, accountEmail, app string, deviceKey []
 			continue
 		}
 
+		// Get collection key first (needed to decrypt name)
+		collectionKey, err := GetCollectionKey(coll, accountSecret.MasterKey, accountSecret.SecretKey, accountSecret.PublicKey, targetAccount.UserID)
+		if err != nil {
+			log.Printf("Warning: failed to get collection key for %d: %v", coll.ID, err)
+			continue
+		}
+
 		// Decrypt collection name
-		collName, err := DecryptCollectionName(coll, accountSecret.MasterKey)
+		collName, err := DecryptCollectionName(coll, collectionKey)
 		if err != nil {
 			log.Printf("Warning: failed to decrypt collection %d: %v", coll.ID, err)
 			collName = fmt.Sprintf("Collection %d", coll.ID)
 		}
 
+		// Check if shared
+		isShared := coll.Owner.ID != targetAccount.UserID
+
 		result = append(result, DecryptedCollection{
-			ID:         coll.ID,
-			OwnerID:    coll.Owner.ID,
-			Name:       collName,
-			IsShared:   coll.IsShared,
-			IsDeleted:  coll.IsDeleted,
-			UpdatedTime: time.UnixMicro(coll.UpdatedTime),
+			ID:                 coll.ID,
+			OwnerID:            coll.Owner.ID,
+			Name:               collName,
+			Type:               coll.Type,
+			IsShared:           isShared,
+			IsDeleted:          coll.IsDeleted,
+			UpdatedTime:        time.UnixMicro(coll.UpdatedTime),
+			EncryptedKey:       coll.EncryptedKey,
+			KeyDecryptionNonce: coll.KeyDecryptionNonce,
 		})
 	}
 

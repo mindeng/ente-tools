@@ -110,12 +110,18 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 
 		s.stats.TotalFiles++
 
-		// Check if this is a video component of a Live Photo
-		// If so, we process it as a Live Photo (not as an individual file)
+		// Check if this file is part of a Live Photo
 		baseName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		if pair, ok := livePhotoPairs[baseName]; ok && livephoto.GetFileType(filepath.Base(path)) == types.FileTypeVideo {
-			// This is the video component, process as Live Photo
-			return s.processLivePhoto(pair, path)
+		if pair, ok := livePhotoPairs[baseName]; ok {
+			// This file is part of a Live Photo
+			fileType := livephoto.GetFileType(filepath.Base(path))
+			if fileType == types.FileTypeVideo {
+				// Process the entire Live Photo when we hit the video component
+				return s.processLivePhoto(pair, path)
+			}
+			// Skip the image component - it will be processed as part of the Live Photo
+			s.stats.SkippedFiles++
+			return nil
 		}
 
 		// Regular file processing

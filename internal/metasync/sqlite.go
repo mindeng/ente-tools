@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"database/sql"
@@ -50,9 +52,12 @@ func (d *Database) initSchema() error {
 		id INTEGER PRIMARY KEY,
 		owner_id INTEGER NOT NULL,
 		name TEXT NOT NULL,
+		type TEXT NOT NULL DEFAULT 'uncategorized',
 		is_shared BOOLEAN DEFAULT FALSE,
 		is_deleted BOOLEAN DEFAULT FALSE,
 		updated_at INTEGER,
+		encrypted_key TEXT,
+		key_decryption_nonce TEXT,
 		synced_at INTEGER DEFAULT (strftime('%s', 'now'))
 	);
 
@@ -85,34 +90,50 @@ func (d *Database) initSchema() error {
 		last_collection_sync INTEGER DEFAULT 0,
 		last_sync_time INTEGER DEFAULT (strftime('%s', 'now'))
 	);
+
+	-- Add columns if they don't exist (for existing databases)
+	ALTER TABLE collections ADD COLUMN encrypted_key TEXT;
+	ALTER TABLE collections ADD COLUMN key_decryption_nonce TEXT;
 	`
 
 	_, err := d.db.Exec(schema)
-	return err
+	if err != nil {
+		// Ignore "duplicate column" errors
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpsertCollection inserts or updates a collection
 func (d *Database) UpsertCollection(coll DecryptedCollection) error {
 	query := `
-	INSERT INTO collections (id, owner_id, name, is_shared, is_deleted, updated_at, synced_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO collections (id, owner_id, name, type, is_shared, is_deleted, updated_at, synced_at, encrypted_key, key_decryption_nonce)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		owner_id = excluded.owner_id,
 		name = excluded.name,
+		type = excluded.type,
 		is_shared = excluded.is_shared,
 		is_deleted = excluded.is_deleted,
 		updated_at = excluded.updated_at,
-		synced_at = excluded.synced_at
+		synced_at = excluded.synced_at,
+		encrypted_key = excluded.encrypted_key,
+		key_decryption_nonce = excluded.key_decryption_nonce
 	`
 
 	_, err := d.db.Exec(query,
 		coll.ID,
 		coll.OwnerID,
 		coll.Name,
+		coll.Type,
 		coll.IsShared,
 		coll.IsDeleted,
-		coll.UpdatedTime,
+		coll.UpdatedTime.UnixMicro(),
 		time.Now().Unix(),
+		coll.EncryptedKey,
+		coll.KeyDecryptionNonce,
 	)
 
 	return err
@@ -285,10 +306,23 @@ func (d *Database) GetCollections() ([]DecryptedCollection, error) {
 	var collections []DecryptedCollection
 	for rows.Next() {
 		var coll DecryptedCollection
-		err := rows.Scan(&coll.ID, &coll.OwnerID, &coll.Name, &coll.IsShared, &coll.IsDeleted, &coll.UpdatedTime)
+		var updatedAt string
+		err := rows.Scan(&coll.ID, &coll.OwnerID, &coll.Name, &coll.IsShared, &coll.IsDeleted, &updatedAt)
 		if err != nil {
 			log.Printf("Error scanning collection: %v", err)
 			continue
+		}
+		// Parse SQLite datetime string to time.Time
+		if t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", updatedAt); err == nil {
+			coll.UpdatedTime = t
+		} else {
+			// Fallback: try to parse as Unix microsecond timestamp
+			if timestamp, err := strconv.ParseInt(updatedAt, 10, 64); err == nil {
+				coll.UpdatedTime = time.UnixMicro(timestamp)
+			} else {
+				// Last resort: use current time
+				coll.UpdatedTime = time.Now()
+			}
 		}
 		collections = append(collections, coll)
 	}
@@ -321,4 +355,54 @@ func (d *Database) GetAllHashes() (map[string]bool, error) {
 	}
 
 	return hashes, nil
+}
+
+// GetUncategorizedCollection retrieves the uncategorized collection from the database
+func (d *Database) GetUncategorizedCollection() (*DecryptedCollection, error) {
+	query := `
+	SELECT id, owner_id, name, type, is_shared, is_deleted, updated_at, encrypted_key, key_decryption_nonce
+	FROM collections
+	WHERE type = 'uncategorized' AND is_deleted = FALSE
+	ORDER BY updated_at DESC
+	LIMIT 1
+	`
+
+	var coll DecryptedCollection
+	var collType string
+	var updatedAt string
+
+	err := d.db.QueryRow(query).Scan(
+		&coll.ID,
+		&coll.OwnerID,
+		&coll.Name,
+		&collType,
+		&coll.IsShared,
+		&coll.IsDeleted,
+		&updatedAt,
+		&coll.EncryptedKey,
+		&coll.KeyDecryptionNonce,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // No uncategorized collection found
+		}
+		return nil, err
+	}
+
+	coll.Type = collType
+	// Parse SQLite datetime string to time.Time
+	if t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", updatedAt); err == nil {
+		coll.UpdatedTime = t
+	} else {
+		// Fallback: try to parse as Unix microsecond timestamp
+		if timestamp, err := strconv.ParseInt(updatedAt, 10, 64); err == nil {
+			coll.UpdatedTime = time.UnixMicro(timestamp)
+		} else {
+			// Last resort: use current time
+			coll.UpdatedTime = time.Now()
+		}
+	}
+
+	return &coll, nil
 }

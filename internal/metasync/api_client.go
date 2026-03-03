@@ -3,6 +3,7 @@ package metasync
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -63,12 +64,14 @@ type Collection struct {
 	Owner               Owner                  `json:"owner"`
 	EncryptedKey        string                 `json:"encryptedKey"`
 	KeyDecryptionNonce  string                 `json:"keyDecryptionNonce"`
+	Name                string                 `json:"name"`
 	EncryptedName       string                 `json:"encryptedName"`
 	NameDecryptionNonce string                 `json:"nameDecryptionNonce"`
+	Type                string                 `json:"type"`
 	MagicMetadata       map[string]interface{} `json:"magicMetadata"`
-	IsShared            bool                   `json:"isShared"`
 	IsDeleted           bool                   `json:"isDeleted"`
-	UpdatedTime         int64                  `json:"updatedTime"`
+	UpdatedTime         int64                  `json:"updationTime"`
+	IsShared            bool                   `json:"isShared"`
 }
 
 // Owner represents a user who owns a collection
@@ -77,24 +80,40 @@ type Owner struct {
 	Email string `json:"email"`
 }
 
+// FileAttributes represents an encrypted file item
+type FileAttributes struct {
+	EncryptedData    string `json:"encryptedData,omitempty"`
+	DecryptionHeader string `json:"decryptionHeader" binding:"required"`
+}
+
+// MagicMetadata represents encrypted magic metadata
+type MagicMetadata struct {
+	Data   string `json:"data"`
+	Header string `json:"header"`
+}
+
 // File represents a photo or video file
 type File struct {
-	ID              int64                  `json:"id"`
-	OwnerID         int64                  `json:"ownerID"`
-	Key             EncString              `json:"key"`
-	LastUpdateTime  int64                  `json:"lastUpdateTime"`
-	FileNonce       string                 `json:"fileNonce"`
-	ThumbnailNonce  string                 `json:"thumbnailNonce"`
-	Metadata        map[string]interface{} `json:"metadata"`
-	PrivateMetadata map[string]interface{} `json:"privateMetadata"`
-	PublicMetadata  map[string]interface{} `json:"publicMetadata"`
-	Info            FileInfo               `json:"info"`
+	ID                 int64           `json:"id"`
+	OwnerID            int64           `json:"ownerID"`
+	CollectionID       int64           `json:"collectionID"`
+	CollectionOwnerID  *int64          `json:"collectionOwnerID"`
+	EncryptedKey       string          `json:"encryptedKey"`
+	KeyDecryptionNonce string          `json:"keyDecryptionNonce"`
+	File               FileAttributes  `json:"file" binding:"required"`
+	Thumbnail          FileAttributes  `json:"thumbnail" binding:"required"`
+	Metadata           FileAttributes  `json:"metadata" binding:"required"`
+	IsDeleted          bool            `json:"isDeleted"`
+	UpdationTime       int64           `json:"updationTime"`
+	MagicMetadata      *MagicMetadata  `json:"magicMetadata,omitempty"`
+	PubicMagicMetadata *MagicMetadata  `json:"pubMagicMetadata,omitempty"`
+	Info               *FileInfo       `json:"info,omitempty"`
 }
 
 // FileInfo contains file size information
 type FileInfo struct {
-	FileSize      int64 `json:"fileSize"`
-	ThumbnailSize int64 `json:"thumbSize"`
+	FileSize      int64 `json:"fileSize,omitempty"`
+	ThumbnailSize int64 `json:"thumbSize,omitempty"`
 }
 
 // GetCollections retrieves collections from the API
@@ -145,78 +164,156 @@ func (c *APIClient) GetFiles(ctx context.Context, collectionID, sinceTime int64)
 
 // DecryptedFile represents a file with decrypted metadata
 type DecryptedFile struct {
-	ID              int64
-	CollectionID    int64
-	OwnerID         int64
-	Title           string
-	Description     *string
-	CreationTime    time.Time
+	ID               int64
+	CollectionID     int64
+	OwnerID          int64
+	Title            string
+	Description      *string
+	CreationTime     time.Time
 	ModificationTime time.Time
-	Latitude        *float64
-	Longitude       *float64
-	FileType        string
-	FileSize        int64
-	Hash            *string
-	EXIFMake        *string
-	EXIFModel       *string
-	IsDeleted       bool
+	Latitude         *float64
+	Longitude        *float64
+	FileType         string
+	FileSize         int64
+	Hash             *string
+	EXIFMake         *string
+	EXIFModel        *string
+	IsDeleted        bool
 }
 
 // DecryptedCollection represents a collection with decrypted name
 type DecryptedCollection struct {
-	ID         int64
-	OwnerID    int64
-	Name       string
-	IsShared   bool
-	IsDeleted  bool
-	UpdatedTime time.Time
+	ID                 int64
+	OwnerID            int64
+	Name               string
+	Type               string
+	IsShared           bool
+	IsDeleted          bool
+	UpdatedTime        time.Time
+	EncryptedKey       string
+	KeyDecryptionNonce string
 }
 
 // DecryptFile decrypts a file's metadata using the collection key
 func DecryptFile(file File, collectionKey []byte) (*DecryptedFile, error) {
+	// First, decrypt the file key using the collection key
+	fileKey, err := SecretBoxOpen(
+		decodeBase64(file.EncryptedKey),
+		decodeBase64(file.KeyDecryptionNonce),
+		collectionKey,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt file key: %w", err)
+	}
+
+	// Decrypt metadata
+	var metadata map[string]interface{}
+	if file.Metadata.DecryptionHeader != "" && file.Metadata.EncryptedData != "" {
+		_, metadataBytes, err := DecryptChaChaBase64(file.Metadata.EncryptedData, fileKey, file.Metadata.DecryptionHeader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt metadata: %w", err)
+		}
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+	}
+
+	// Decrypt magic metadata (private)
+	var privateMetadata map[string]interface{}
+	if file.MagicMetadata != nil && file.MagicMetadata.Header != "" {
+		_, magicBytes, err := DecryptChaChaBase64(file.MagicMetadata.Data, fileKey, file.MagicMetadata.Header)
+		if err != nil {
+			// Magic metadata may not exist for all files, don't fail
+			privateMetadata = make(map[string]interface{})
+		} else {
+			if err := json.Unmarshal(magicBytes, &privateMetadata); err != nil {
+				privateMetadata = make(map[string]interface{})
+			}
+		}
+	}
+
+	// Decrypt public magic metadata
+	var publicMetadata map[string]interface{}
+	if file.PubicMagicMetadata != nil && file.PubicMagicMetadata.Header != "" {
+		_, pubMagicBytes, err := DecryptChaChaBase64(file.PubicMagicMetadata.Data, fileKey, file.PubicMagicMetadata.Header)
+		if err != nil {
+			// Public magic metadata may not exist for all files, don't fail
+			publicMetadata = make(map[string]interface{})
+		} else {
+			if err := json.Unmarshal(pubMagicBytes, &publicMetadata); err != nil {
+				publicMetadata = make(map[string]interface{})
+			}
+		}
+	}
+
 	// Decrypt file title from metadata
 	title := ""
-	if t, ok := file.Metadata["title"].(string); ok {
-		title = t
+	if metadata != nil {
+		if t, ok := metadata["title"].(string); ok {
+			title = t
+		}
 	}
 
 	// Check for edited name in public metadata
-	if pubMeta := file.PublicMetadata; pubMeta != nil {
-		if editedName, ok := pubMeta["editedName"].(string); ok {
+	if publicMetadata != nil {
+		if editedName, ok := publicMetadata["editedName"].(string); ok {
 			title = editedName
 		}
 	}
 
-	// Get description
+	// Get description (caption)
 	var description *string
-	if pubMeta := file.PublicMetadata; pubMeta != nil {
-		if caption, ok := pubMeta["caption"].(string); ok && caption != "" {
+	// First check metadata for caption
+	if metadata != nil {
+		if caption, ok := metadata["caption"].(string); ok && caption != "" {
+			description = &caption
+		}
+	}
+	// Also check publicMetadata for caption
+	if description == nil && publicMetadata != nil {
+		if caption, ok := publicMetadata["caption"].(string); ok && caption != "" {
 			description = &caption
 		}
 	}
 
 	// Get creation time
 	creationTime := time.Now()
-	if pubMeta := file.PublicMetadata; pubMeta != nil {
-		if editedTime, ok := pubMeta["editedTime"].(float64); ok && editedTime != 0 {
+	if publicMetadata != nil {
+		if editedTime, ok := publicMetadata["editedTime"].(float64); ok && editedTime != 0 {
 			creationTime = time.UnixMicro(int64(editedTime))
 		}
 	}
-	if ct, ok := file.Metadata["creationTime"].(float64); ok {
-		creationTime = time.UnixMicro(int64(ct))
+	if metadata != nil {
+		if ct, ok := metadata["creationTime"].(float64); ok {
+			creationTime = time.UnixMicro(int64(ct))
+		}
 	}
 
 	// Get modification time
 	modificationTime := time.Now()
-	if mt, ok := file.Metadata["modificationTime"].(float64); ok {
-		modificationTime = time.UnixMicro(int64(mt))
+	if metadata != nil {
+		if mt, ok := metadata["modificationTime"].(float64); ok {
+			modificationTime = time.UnixMicro(int64(mt))
+		}
 	}
 
 	// Get location
 	var lat, long *float64
-	if pubMeta := file.PublicMetadata; pubMeta != nil {
-		if latitude, ok := pubMeta["lat"].(float64); ok {
-			if longitude, ok := pubMeta["long"].(float64); ok {
+	// First check metadata (where ente stores lat/long)
+	if metadata != nil {
+		if latitude, ok := metadata["latitude"].(float64); ok {
+			if longitude, ok := metadata["longitude"].(float64); ok {
+				if latitude != 0 || longitude != 0 {
+					lat = &latitude
+					long = &longitude
+				}
+			}
+		}
+	}
+	// Also check publicMetadata for lat/long (alternative location)
+	if lat == nil && publicMetadata != nil {
+		if latitude, ok := publicMetadata["lat"].(float64); ok {
+			if longitude, ok := publicMetadata["long"].(float64); ok {
 				if latitude != 0 || longitude != 0 {
 					lat = &latitude
 					long = &longitude
@@ -227,98 +324,93 @@ func DecryptFile(file File, collectionKey []byte) (*DecryptedFile, error) {
 
 	// Get file type
 	fileType := "image"
-	if ft, ok := file.Metadata["fileType"].(float64); ok {
-		switch int8(ft) {
-		case 0:
-			fileType = "image"
-		case 1:
-			fileType = "video"
-		case 2:
-			fileType = "livephoto"
+	if metadata != nil {
+		if ft, ok := metadata["fileType"].(float64); ok {
+			switch int8(ft) {
+			case 0:
+				fileType = "image"
+			case 1:
+				fileType = "video"
+			case 2:
+				fileType = "livephoto"
+			}
 		}
 	}
 
 	// Get file size
 	fileSize := int64(0)
-	if file.Info.FileSize > 0 {
+	if file.Info != nil && file.Info.FileSize > 0 {
 		fileSize = file.Info.FileSize
 	}
 
 	// Get hash
 	var hash *string
-	if h, ok := file.Metadata["hash"].(string); ok {
-		hash = &h
-	} else {
-		// Check for live photo hash
-		if imgHash, ok := file.Metadata["imageHash"].(string); ok {
-			if vidHash, ok := file.Metadata["videoHash"].(string); ok {
-				combinedHash := fmt.Sprintf("%s:%s", imgHash, vidHash)
-				hash = &combinedHash
+	if metadata != nil {
+		if h, ok := metadata["hash"].(string); ok && h != "" {
+			hash = &h
+		} else {
+			// Check for live photo hash
+			if imgHash, ok := metadata["imageHash"].(string); ok {
+				if vidHash, ok := metadata["videoHash"].(string); ok {
+					combinedHash := fmt.Sprintf("%s:%s", imgHash, vidHash)
+					hash = &combinedHash
+				}
 			}
 		}
 	}
 
 	// EXIF data - if available in metadata, store it
 	var exifMake, exifModel *string
-	if pubMeta := file.PublicMetadata; pubMeta != nil {
-		if make, ok := pubMeta["exifMake"].(string); ok && make != "" {
+	if publicMetadata != nil {
+		// Try ente's field names first
+		if make, ok := publicMetadata["cameraMake"].(string); ok && make != "" {
+			exifMake = &make
+		} else if make, ok := publicMetadata["exifMake"].(string); ok && make != "" {
 			exifMake = &make
 		}
-		if model, ok := pubMeta["exifModel"].(string); ok && model != "" {
+		if model, ok := publicMetadata["cameraModel"].(string); ok && model != "" {
+			exifModel = &model
+		} else if model, ok := publicMetadata["exifModel"].(string); ok && model != "" {
 			exifModel = &model
 		}
 	}
 
 	return &DecryptedFile{
-		ID:              file.ID,
-		OwnerID:         file.OwnerID,
-		Title:           title,
-		Description:     description,
-		CreationTime:    creationTime,
+		ID:               file.ID,
+		OwnerID:          file.OwnerID,
+		Title:            title,
+		Description:      description,
+		CreationTime:     creationTime,
 		ModificationTime: modificationTime,
-		Latitude:        lat,
-		Longitude:       long,
-		FileType:        fileType,
-		FileSize:        fileSize,
-		Hash:            hash,
-		EXIFMake:        exifMake,
-		EXIFModel:       exifModel,
-		IsDeleted:       false,
+		Latitude:         lat,
+		Longitude:        long,
+		FileType:         fileType,
+		FileSize:         fileSize,
+		Hash:             hash,
+		EXIFMake:         exifMake,
+		EXIFModel:        exifModel,
+		IsDeleted:        false,
 	}, nil
 }
 
 // DecryptCollectionName decrypts a collection's name
-func DecryptCollectionName(collection Collection, key []byte) (string, error) {
-	// Try to decrypt the encrypted name
-	decrypted, err := decryptBase64Data(collection.EncryptedName, collection.NameDecryptionNonce, key)
-	if err == nil {
+func DecryptCollectionName(collection Collection, collectionKey []byte) (string, error) {
+	// If there's an encrypted name, decrypt it using SecretBox
+	if collection.EncryptedName != "" {
+		decrypted, err := SecretBoxOpenBase64(collection.EncryptedName, collection.NameDecryptionNonce, collectionKey)
+		if err != nil {
+			return "", err
+		}
 		return string(decrypted), nil
 	}
 
-	// Fallback: try magic metadata
-	if collection.MagicMetadata != nil {
-		if name, ok := collection.MagicMetadata["name"].(string); ok {
-			return name, nil
-		}
+	// Fallback: use the plain name (early beta users might have collections without encrypted names)
+	if collection.Name != "" {
+		return collection.Name, nil
 	}
 
 	// Last resort: use ID as name
 	return fmt.Sprintf("Collection %d", collection.ID), nil
-}
-
-// decryptBase64Data decrypts base64-encoded data with nonce
-func decryptBase64Data(cipherText, nonceBase64 string, key []byte) ([]byte, error) {
-	cipherBytes, err := base64.StdEncoding.DecodeString(cipherText)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce, err := base64.StdEncoding.DecodeString(nonceBase64)
-	if err != nil {
-		return nil, err
-	}
-
-	return decryptChaCha20Poly1305(cipherBytes, key, nonce)
 }
 
 // GetCollectionKey decrypts a collection's key
@@ -333,4 +425,10 @@ func GetCollectionKey(collection Collection, masterKey, secretKey, publicKey []b
 	// Shared collection: use sealed box with public/secret key
 	cipherBytes, _ := base64.StdEncoding.DecodeString(collection.EncryptedKey)
 	return SealedBoxOpen(cipherBytes, publicKey, secretKey)
+}
+
+// decodeBase64 decodes a base64 string
+func decodeBase64(s string) []byte {
+	b, _ := base64.StdEncoding.DecodeString(s)
+	return b
 }

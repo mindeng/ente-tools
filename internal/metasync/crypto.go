@@ -3,6 +3,7 @@ package metasync
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -25,7 +26,7 @@ const (
 	TagFinal = TagPush | TagRekey
 
 	StreamKeyBytes    = chacha20poly1305.KeySize
-	StreamHeaderBytes = chacha20poly1305.NonceSizeX
+	StreamHeaderBytes = 24 // libsodium's crypto_secretstream_xchacha20poly1305_HEADERBYTES
 	// XChaCha20Poly1305IetfABYTES links to crypto_secretstream_xchacha20poly1305_ABYTES
 	XChaCha20Poly1305IetfABYTES = 16 + 1
 )
@@ -77,9 +78,9 @@ func NewDecryptor(key, header []byte) (*decryptor, error) {
 
 	stream.reset()
 
-	// Copy the inonce from header
-	copy(stream.nonce[cryptoSecretStreamXchacha20poly1305Counterbytes:],
-		header[cryptoCoreHchacha20InputBytes:])
+	// Copy the inonce from header (8 bytes at offset 16)
+	copy(stream.nonce[cryptoSecretStreamXchacha20poly1305Counterbytes:cryptoSecretStreamXchacha20poly1305Counterbytes+8],
+		header[16:24])
 
 	copy(stream.pad[:], pad0[:])
 
@@ -199,6 +200,21 @@ func SecretBoxOpen(cipher []byte, nonce []byte, key []byte) ([]byte, error) {
 	}
 
 	return decrypted, nil
+}
+
+// SecretBoxOpenBase64 decrypts base64-encoded secretbox data
+func SecretBoxOpenBase64(cipher string, nonce string, key []byte) ([]byte, error) {
+	cipherBytes, err := base64.StdEncoding.DecodeString(cipher)
+	if err != nil {
+		return nil, err
+	}
+
+	nonceBytes, err := base64.StdEncoding.DecodeString(nonce)
+	if err != nil {
+		return nil, err
+	}
+
+	return SecretBoxOpen(cipherBytes, nonceBytes, key)
 }
 
 // SealedBoxOpen decrypts data using NaCl sealed box (for shared collections)

@@ -43,3 +43,19 @@ func ComputeHash(r io.Reader) (string, error) {
 	hashBytes := hasher.Sum(nil)
 	return base64.StdEncoding.EncodeToString(hashBytes), nil
 }
+
+// ComputeHashFromBytes calculates the Blake2b hash of byte slice
+// Returns a base64 encoded 64-byte hash (512 bits) to match Ente's implementation
+func ComputeHashFromBytes(data []byte) (string, error) {
+	hasher, err := blake2b.New512(nil)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := hasher.Write(data); err != nil {
+		return "", err
+	}
+
+	hashBytes := hasher.Sum(nil)
+	return base64.StdEncoding.EncodeToString(hashBytes), nil
+}
