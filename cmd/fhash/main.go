@@ -8,11 +8,11 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "ente-hashcmp",
-	Short: "Ente file hash comparison tool",
+	Use:   "fhash",
+	Short: "File hash comparison tool",
 	Long: `A command-line tool for calculating and comparing file hashes.
-Uses Blake2b algorithm (matching Ente's implementation) with support
-for Live Photos, directory scanning, and bbolt database storage.`,
+Uses Blake2b algorithm with support for Live Photos, directory scanning,
+and bbolt database storage.`,
 }
 
 func main() {

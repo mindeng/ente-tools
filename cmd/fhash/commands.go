@@ -23,11 +23,11 @@ var scanCmd = &cobra.Command{
 	Run:   runScan,
 }
 
-var compareCmd = &cobra.Command{
-	Use:   "compare <dir1> <dir2>",
+var diffCmd = &cobra.Command{
+	Use:   "diff <dir1> <dir2>",
 	Short: "Compare two directories' hash sets",
 	Args:  cobra.ExactArgs(2),
-	Run:   runCompare,
+	Run:   runDiff,
 }
 
 var hashCmd = &cobra.Command{
@@ -37,8 +37,8 @@ var hashCmd = &cobra.Command{
 	Run:   runHash,
 }
 
-var dbPathCmd = &cobra.Command{
-	Use:   "db-path <dir>",
+var dbpathCmd = &cobra.Command{
+	Use:   "dbpath <dir>",
 	Short: "Get the database file path for a directory",
 	Args:  cobra.ExactArgs(1),
 	Run:   runDBPath,
@@ -46,9 +46,9 @@ var dbPathCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(scanCmd)
-	rootCmd.AddCommand(compareCmd)
+	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(hashCmd)
-	rootCmd.AddCommand(dbPathCmd)
+	rootCmd.AddCommand(dbpathCmd)
 }
 
 func runScan(cmd *cobra.Command, args []string) {
@@ -91,7 +91,7 @@ func runScan(cmd *cobra.Command, args []string) {
 	fmt.Print(comparator.FormatScanStats(stats, scanner.GetDBPath()))
 }
 
-func runCompare(cmd *cobra.Command, args []string) {
+func runDiff(cmd *cobra.Command, args []string) {
 	dirA := args[0]
 	dirB := args[1]
 
