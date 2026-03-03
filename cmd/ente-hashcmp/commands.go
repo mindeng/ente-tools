@@ -51,22 +51,24 @@ var dbPathCmd = &cobra.Command{
 	Run:   runDBPath,
 }
 
-// Meta commands
-var metaCmd = &cobra.Command{
-	Use:   "meta <subcommand>",
-	Short: "Sync ente.io metadata to local database",
-}
-
-var metaAccountsCmd = &cobra.Command{
+// Accounts command
+var accountsCmd = &cobra.Command{
 	Use:   "accounts",
 	Short: "List configured ente accounts",
 	Run:   runMetaAccounts,
 }
 
-var metaCollectionsCmd = &cobra.Command{
+// Collections command
+var collectionsCmd = &cobra.Command{
 	Use:   "collections",
 	Short: "List collections for an account",
 	Run:   runMetaCollections,
+}
+
+// Meta commands
+var metaCmd = &cobra.Command{
+	Use:   "meta <subcommand>",
+	Short: "Sync ente.io metadata to local database",
 }
 
 var metaSyncCmd = &cobra.Command{
@@ -122,13 +124,13 @@ func init() {
 	rootCmd.AddCommand(compareCmd)
 	rootCmd.AddCommand(hashCmd)
 	rootCmd.AddCommand(dbPathCmd)
+	rootCmd.AddCommand(accountsCmd)
+	rootCmd.AddCommand(collectionsCmd)
 	rootCmd.AddCommand(metaCmd)
 	rootCmd.AddCommand(findingsCmd)
 	rootCmd.AddCommand(uploadCmd)
 
 	// Meta subcommands
-	metaCmd.AddCommand(metaAccountsCmd)
-	metaCmd.AddCommand(metaCollectionsCmd)
 	metaCmd.AddCommand(metaSyncCmd)
 	metaCmd.AddCommand(metaDebugCmd)
 
@@ -136,24 +138,26 @@ func init() {
 	findingsCmd.AddCommand(findingsMissingCmd)
 
 	// Upload flags
-	uploadCmd.Flags().StringVar(&uploadAccountFlag, "account", "", "Account email (required)")
+	uploadCmd.Flags().StringVarP(&uploadAccountFlag, "account", "a", "", "Account email (required)")
 	uploadCmd.Flags().StringVar(&uploadAppFlag, "app", "photos", "App type (photos, auth, locker)")
-	uploadCmd.Flags().StringVarP(&uploadAlbumFlag, "album", "a", "", "Album name or ID (default: uncategorized)")
+	uploadCmd.Flags().StringVarP(&uploadAlbumFlag, "album", "", "", "Album name or ID (default: uncategorized)")
 	uploadCmd.Flags().BoolVarP(&uploadVerboseFlag, "verbose", "v", false, "Verbose output")
 	uploadCmd.MarkFlagRequired("account")
 
-	// Flags
-	metaCollectionsCmd.Flags().StringVar(&metaAccountFlag, "account", "", "Account email (required)")
-	metaCollectionsCmd.Flags().StringVar(&metaAppFlag, "app", "photos", "App type (photos, auth, locker)")
-	metaCollectionsCmd.Flags().BoolVarP(&metaVerboseFlag, "verbose", "v", false, "Verbose output")
-	metaCollectionsCmd.MarkFlagRequired("account")
+	// Collections flags
+	collectionsCmd.Flags().StringVarP(&metaAccountFlag, "account", "a", "", "Account email (required)")
+	collectionsCmd.Flags().StringVar(&metaAppFlag, "app", "photos", "App type (photos, auth, locker)")
+	collectionsCmd.Flags().BoolVarP(&metaVerboseFlag, "verbose", "v", false, "Verbose output")
+	collectionsCmd.MarkFlagRequired("account")
 
-	metaSyncCmd.Flags().StringVar(&metaAccountFlag, "account", "", "Account email (required)")
+	// Meta sync flags
+	metaSyncCmd.Flags().StringVarP(&metaAccountFlag, "account", "a", "", "Account email (required)")
 	metaSyncCmd.Flags().StringVar(&metaAppFlag, "app", "photos", "App type (photos, auth, locker)")
 	metaSyncCmd.Flags().StringVarP(&metaOutputFlag, "output", "o", "", "Output database path (default: ~/.ente/metasync.db)")
 	metaSyncCmd.Flags().BoolVarP(&metaVerboseFlag, "verbose", "v", false, "Verbose output")
 	metaSyncCmd.MarkFlagRequired("account")
 
+	// Findings flags
 	findingsMissingCmd.Flags().StringVar(&findingsMetaDBFlag, "meta-db", "", "Path to metasync database (default: ~/.ente/metasync.db)")
 	findingsMissingCmd.Flags().BoolVarP(&findingsVerboseFlag, "verbose", "v", false, "Verbose output")
 }
