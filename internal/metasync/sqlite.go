@@ -207,11 +207,14 @@ func (d *Database) UpdateSyncState(accountKey string, lastCollectionSync int64) 
 	return err
 }
 
-// GetLastSyncTime retrieves the last sync time for a collection
-func (d *Database) GetLastSyncTime(collectionID int64) (int64, error) {
-	// For simplicity, we use 0 for first sync
-	// A more advanced implementation would track per-collection sync time
-	return 0, nil
+// GetLastSyncTime retrieves the last sync time for the account
+func (d *Database) GetLastSyncTime(accountKey string) (int64, error) {
+	var lastSyncTime int64
+	err := d.db.QueryRow("SELECT last_collection_sync FROM sync_state WHERE account_key = ?", accountKey).Scan(&lastSyncTime)
+	if err == sql.ErrNoRows {
+		return 0, nil // First sync
+	}
+	return lastSyncTime, err
 }
 
 // GetCollectionsCount returns the total number of collections

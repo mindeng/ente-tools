@@ -457,8 +457,8 @@ func runMetaSync(cmd *cobra.Command, args []string) {
 
 	// Print results
 	fmt.Printf("Sync completed in %v\n", result.Duration)
-	fmt.Printf("Collections synced: %d\n", result.CollectionsSynced)
-	fmt.Printf("Files synced: %d\n", result.FilesSynced)
+	fmt.Printf("Collections pulled: %d\n", result.CollectionsPulled)
+	fmt.Printf("Files pulled: %d\n", result.FilesPulled)
 
 	if len(result.Errors) > 0 {
 		fmt.Printf("\nEncountered %d error(s):\n", len(result.Errors))

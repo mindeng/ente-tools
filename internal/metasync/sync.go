@@ -19,8 +19,8 @@ type SyncOptions struct {
 
 // SyncResult contains statistics about the sync operation
 type SyncResult struct {
-	CollectionsSynced int
-	FilesSynced       int
+	CollectionsPulled int
+	FilesPulled       int
 	Errors            []error
 	Duration          time.Duration
 }
@@ -82,14 +82,21 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 	}
 
 	// Get collections (incremental sync)
-	lastSyncTime, _ := db.GetLastSyncTime(0) // Using 0 for now
+	lastSyncTime, err := db.GetLastSyncTime(targetAccount.AccountKey())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get last sync time: %w", err)
+	}
+
 	collections, err := apiClient.GetCollections(ctx, lastSyncTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collections: %w", err)
 	}
 
+	// Count collections from API (these are the "diff" records)
+	result.CollectionsPulled = len(collections)
+
 	if opts.Verbose {
-		log.Printf("Found %d collections from API", len(collections))
+		log.Printf("Found %d collections from API (since time: %d)", result.CollectionsPulled, lastSyncTime)
 	}
 
 	// Process each collection
@@ -135,7 +142,6 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 			result.Errors = append(result.Errors, fmt.Errorf("failed to upsert collection %s: %w", collName, err))
 			continue
 		}
-		result.CollectionsSynced++
 
 		if opts.Verbose {
 			log.Printf("Syncing collection: %s (%d)", collName, coll.ID)
@@ -149,6 +155,9 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 				result.Errors = append(result.Errors, fmt.Errorf("failed to get files for collection %s: %w", collName, err))
 				break
 			}
+
+			// Count files from API (these are the "diff" records)
+			result.FilesPulled += len(files)
 
 			// Process files
 			for _, file := range files {
@@ -171,7 +180,6 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 					result.Errors = append(result.Errors, fmt.Errorf("failed to upsert file %d: %w", file.ID, err))
 					continue
 				}
-				result.FilesSynced++
 			}
 
 			if !hasMore {
