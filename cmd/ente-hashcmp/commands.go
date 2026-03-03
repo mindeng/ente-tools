@@ -11,6 +11,7 @@ import (
 
 	"ente-hashcmp/internal/comparator"
 	"ente-hashcmp/internal/database"
+	"ente-hashcmp/internal/findings"
 	"ente-hashcmp/internal/hash"
 	"ente-hashcmp/internal/livephoto"
 	"ente-hashcmp/internal/metasync"
@@ -77,12 +78,27 @@ var metaDebugCmd = &cobra.Command{
 	Run:   runMetaDebug,
 }
 
+// Findings commands
+var findingsCmd = &cobra.Command{
+	Use:   "findings <subcommand>",
+	Short: "Analyze local files against ente library",
+}
+
+var findingsMissingCmd = &cobra.Command{
+	Use:   "missing <dir>",
+	Short: "Find files not in ente library",
+	Args:  cobra.ExactArgs(1),
+	Run:   runFindingsMissing,
+}
+
 // Flags
 var (
-	metaAccountFlag  string
-	metaAppFlag      string
-	metaOutputFlag   string
-	metaVerboseFlag  bool
+	metaAccountFlag   string
+	metaAppFlag       string
+	metaOutputFlag    string
+	metaVerboseFlag   bool
+	findingsMetaDBFlag string
+	findingsVerboseFlag  bool
 )
 
 func init() {
@@ -91,12 +107,16 @@ func init() {
 	rootCmd.AddCommand(hashCmd)
 	rootCmd.AddCommand(dbPathCmd)
 	rootCmd.AddCommand(metaCmd)
+	rootCmd.AddCommand(findingsCmd)
 
 	// Meta subcommands
 	metaCmd.AddCommand(metaAccountsCmd)
 	metaCmd.AddCommand(metaCollectionsCmd)
 	metaCmd.AddCommand(metaSyncCmd)
 	metaCmd.AddCommand(metaDebugCmd)
+
+	// Findings subcommands
+	findingsCmd.AddCommand(findingsMissingCmd)
 
 	// Flags
 	metaCollectionsCmd.Flags().StringVar(&metaAccountFlag, "account", "", "Account email (required)")
@@ -109,6 +129,9 @@ func init() {
 	metaSyncCmd.Flags().StringVarP(&metaOutputFlag, "output", "o", "", "Output database path (default: ~/.ente/metasync.db)")
 	metaSyncCmd.Flags().BoolVarP(&metaVerboseFlag, "verbose", "v", false, "Verbose output")
 	metaSyncCmd.MarkFlagRequired("account")
+
+	findingsMissingCmd.Flags().StringVar(&findingsMetaDBFlag, "meta-db", "", "Path to metasync database (default: ~/.ente/metasync.db)")
+	findingsMissingCmd.Flags().BoolVarP(&findingsVerboseFlag, "verbose", "v", false, "Verbose output")
 }
 
 func runScan(cmd *cobra.Command, args []string) {
@@ -512,6 +535,54 @@ func runMetaDebug(cmd *cobra.Command, args []string) {
 		fmt.Printf("Device Key Length: %d bytes\n", len(deviceKey))
 		fmt.Printf("Device Key (base64): %s\n", base64.StdEncoding.EncodeToString(deviceKey))
 	}
+}
+
+// Findings command handlers
+
+func runFindingsMissing(cmd *cobra.Command, args []string) {
+	dir := args[0]
+
+	// Resolve to absolute path
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving path: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Set default meta db path if not specified
+	metaDBPath := findingsMetaDBFlag
+	if metaDBPath == "" {
+		cliConfigDir, err := metasync.GetEnteCLIConfigDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting CLI config dir: %v\n", err)
+			os.Exit(1)
+		}
+		metaDBPath = filepath.Join(cliConfigDir, "metasync.db")
+	}
+
+	// Check if metasync database exists
+	if _, err := os.Stat(metaDBPath); os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "Error: metasync database not found at %s\n", metaDBPath)
+		fmt.Fprintf(os.Stderr, "Please run 'ente-hashcmp meta sync --account <email>' first to sync your ente metadata.\n")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Analyzing %s...\n", absDir)
+	fmt.Printf("Using ente metadata from: %s\n\n", metaDBPath)
+
+	// Analyze missing files
+	result, err := findings.AnalyzeMissing(findings.AnalyzeOptions{
+		Dir:        absDir,
+		MetaDBPath: metaDBPath,
+		Verbose:    findingsVerboseFlag,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error during analysis: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print results
+	fmt.Print(findings.FormatMissingResult(result))
 }
 
 // Export fileType for the hash command

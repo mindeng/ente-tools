@@ -295,3 +295,30 @@ func (d *Database) GetCollections() ([]DecryptedCollection, error) {
 
 	return collections, nil
 }
+
+// GetAllHashes retrieves all file hashes from the database as a set
+func (d *Database) GetAllHashes() (map[string]bool, error) {
+	query := `
+	SELECT hash FROM files
+	WHERE hash IS NOT NULL AND is_deleted = FALSE
+	`
+
+	rows, err := d.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	hashes := make(map[string]bool)
+	for rows.Next() {
+		var hash string
+		err := rows.Scan(&hash)
+		if err != nil {
+			log.Printf("Error scanning hash: %v", err)
+			continue
+		}
+		hashes[hash] = true
+	}
+
+	return hashes, nil
+}
