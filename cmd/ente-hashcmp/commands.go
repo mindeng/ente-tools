@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"ente-hashcmp/internal/database"
 	"ente-hashcmp/internal/hash"
 	"ente-hashcmp/internal/livephoto"
+	"ente-hashcmp/internal/metasync"
 	"ente-hashcmp/internal/scanner"
 	"ente-hashcmp/internal/types"
 	"ente-hashcmp/pkg/db"
@@ -44,11 +47,68 @@ var dbPathCmd = &cobra.Command{
 	Run:   runDBPath,
 }
 
+// Meta commands
+var metaCmd = &cobra.Command{
+	Use:   "meta <subcommand>",
+	Short: "Sync ente.io metadata to local database",
+}
+
+var metaAccountsCmd = &cobra.Command{
+	Use:   "accounts",
+	Short: "List configured ente accounts",
+	Run:   runMetaAccounts,
+}
+
+var metaCollectionsCmd = &cobra.Command{
+	Use:   "collections",
+	Short: "List collections for an account",
+	Run:   runMetaCollections,
+}
+
+var metaSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync metadata from ente to local database",
+	Run:   runMetaSync,
+}
+
+var metaDebugCmd = &cobra.Command{
+	Use:   "debug",
+	Short: "Debug ente CLI configuration",
+	Run:   runMetaDebug,
+}
+
+// Flags
+var (
+	metaAccountFlag  string
+	metaAppFlag      string
+	metaOutputFlag   string
+	metaVerboseFlag  bool
+)
+
 func init() {
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(compareCmd)
 	rootCmd.AddCommand(hashCmd)
 	rootCmd.AddCommand(dbPathCmd)
+	rootCmd.AddCommand(metaCmd)
+
+	// Meta subcommands
+	metaCmd.AddCommand(metaAccountsCmd)
+	metaCmd.AddCommand(metaCollectionsCmd)
+	metaCmd.AddCommand(metaSyncCmd)
+	metaCmd.AddCommand(metaDebugCmd)
+
+	// Flags
+	metaCollectionsCmd.Flags().StringVar(&metaAccountFlag, "account", "", "Account email (required)")
+	metaCollectionsCmd.Flags().StringVar(&metaAppFlag, "app", "photos", "App type (photos, auth, locker)")
+	metaCollectionsCmd.Flags().BoolVarP(&metaVerboseFlag, "verbose", "v", false, "Verbose output")
+	metaCollectionsCmd.MarkFlagRequired("account")
+
+	metaSyncCmd.Flags().StringVar(&metaAccountFlag, "account", "", "Account email (required)")
+	metaSyncCmd.Flags().StringVar(&metaAppFlag, "app", "photos", "App type (photos, auth, locker)")
+	metaSyncCmd.Flags().StringVarP(&metaOutputFlag, "output", "o", "", "Output database path (default: ~/.ente/metasync.db)")
+	metaSyncCmd.Flags().BoolVarP(&metaVerboseFlag, "verbose", "v", false, "Verbose output")
+	metaSyncCmd.MarkFlagRequired("account")
 }
 
 func runScan(cmd *cobra.Command, args []string) {
@@ -227,6 +287,231 @@ func runDBPath(cmd *cobra.Command, args []string) {
 
 	dbPath := db.GetPath(absDir)
 	fmt.Println(dbPath)
+}
+
+// Meta command handlers
+
+func runMetaAccounts(cmd *cobra.Command, args []string) {
+	// Get ente CLI database path
+	cliConfigDir, err := metasync.GetEnteCLIConfigDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting CLI config dir: %v\n", err)
+		os.Exit(1)
+	}
+	cliDBPath := filepath.Join(cliConfigDir, "ente-cli.db")
+
+	// Load accounts
+	accounts, err := metasync.LoadAccounts(cliDBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading accounts: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Found %d account(s):\n", len(accounts))
+	fmt.Println("====================================")
+	for _, acc := range accounts {
+		fmt.Printf("Email:   %s\n", acc.Email)
+		fmt.Printf("User ID: %d\n", acc.UserID)
+		fmt.Printf("App:     %s\n", acc.App)
+		fmt.Println("====================================")
+	}
+}
+
+func runMetaCollections(cmd *cobra.Command, args []string) {
+	// Get device key
+	deviceKey, err := metasync.GetDeviceKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting device key: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Please make sure ente CLI is configured and you have access to the keyring.\n")
+		os.Exit(1)
+	}
+
+	// Get ente CLI database path
+	cliConfigDir, err := metasync.GetEnteCLIConfigDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting CLI config dir: %v\n", err)
+		os.Exit(1)
+	}
+	cliDBPath := filepath.Join(cliConfigDir, "ente-cli.db")
+
+	// Load accounts
+	accounts, err := metasync.LoadAccounts(cliDBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading accounts: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find matching account
+	var targetAccount *metasync.Account
+	for i := range accounts {
+		if accounts[i].Email == metaAccountFlag && accounts[i].App == metaAppFlag {
+			targetAccount = &accounts[i]
+			break
+		}
+	}
+	if targetAccount == nil {
+		fmt.Fprintf(os.Stderr, "Account not found: %s (app: %s)\n", metaAccountFlag, metaAppFlag)
+		fmt.Fprintf(os.Stderr, "Run 'ente-hashcmp meta accounts' to list available accounts.\n")
+		os.Exit(1)
+	}
+
+	// Decrypt account secrets
+	accountSecret, err := metasync.DecryptAccountSecrets(*targetAccount, deviceKey)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decrypting account secrets: %v\n", err)
+		os.Exit(1)
+	}
+
+	// List collections
+	ctx := context.Background()
+	collections, err := metasync.ListCollections(ctx, metaAccountFlag, metaAppFlag, deviceKey, accountSecret)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error listing collections: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Found %d collection(s):\n", len(collections))
+	fmt.Println("====================================")
+	for _, coll := range collections {
+		fmt.Printf("ID:      %d\n", coll.ID)
+		fmt.Printf("Name:    %s\n", coll.Name)
+		fmt.Printf("Owner:   %d\n", coll.OwnerID)
+		if coll.IsShared {
+			fmt.Printf("Type:    Shared\n")
+		}
+		fmt.Println("====================================")
+	}
+}
+
+func runMetaSync(cmd *cobra.Command, args []string) {
+	// Set default output path if not specified
+	if metaOutputFlag == "" {
+		cliConfigDir, err := metasync.GetEnteCLIConfigDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting CLI config dir: %v\n", err)
+			os.Exit(1)
+		}
+		metaOutputFlag = filepath.Join(cliConfigDir, "metasync.db")
+	}
+
+	// Get device key
+	deviceKey, err := metasync.GetDeviceKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting device key: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Please make sure ente CLI is configured and you have access to the keyring.\n")
+		os.Exit(1)
+	}
+
+	// Get ente CLI database path
+	cliConfigDir, err := metasync.GetEnteCLIConfigDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting CLI config dir: %v\n", err)
+		os.Exit(1)
+	}
+	cliDBPath := filepath.Join(cliConfigDir, "ente-cli.db")
+
+	// Load accounts
+	accounts, err := metasync.LoadAccounts(cliDBPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading accounts: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Find matching account
+	var targetAccount *metasync.Account
+	for i := range accounts {
+		if accounts[i].Email == metaAccountFlag && accounts[i].App == metaAppFlag {
+			targetAccount = &accounts[i]
+			break
+		}
+	}
+	if targetAccount == nil {
+		fmt.Fprintf(os.Stderr, "Account not found: %s (app: %s)\n", metaAccountFlag, metaAppFlag)
+		fmt.Fprintf(os.Stderr, "Run 'ente-hashcmp meta accounts' to list available accounts.\n")
+		os.Exit(1)
+	}
+
+	// Decrypt account secrets
+	accountSecret, err := metasync.DecryptAccountSecrets(*targetAccount, deviceKey)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decrypting account secrets: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Run sync
+	ctx := context.Background()
+	opts := metasync.SyncOptions{
+		AccountEmail:  metaAccountFlag,
+		App:           metaAppFlag,
+		DeviceKey:     deviceKey,
+		AccountSecret: accountSecret,
+		DBPath:        metaOutputFlag,
+		Verbose:       metaVerboseFlag,
+	}
+
+	result, err := metasync.Sync(ctx, opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error during sync: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print results
+	fmt.Printf("Sync completed in %v\n", result.Duration)
+	fmt.Printf("Collections synced: %d\n", result.CollectionsSynced)
+	fmt.Printf("Files synced: %d\n", result.FilesSynced)
+
+	if len(result.Errors) > 0 {
+		fmt.Printf("\nEncountered %d error(s):\n", len(result.Errors))
+		for i, e := range result.Errors {
+			fmt.Printf("%d. %v\n", i+1, e)
+		}
+	}
+
+	fmt.Printf("\nDatabase saved to: %s\n", metaOutputFlag)
+}
+
+func runMetaDebug(cmd *cobra.Command, args []string) {
+	// Get ente CLI config dir
+	cliConfigDir, err := metasync.GetEnteCLIConfigDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting CLI config dir: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("CLI Config Dir: %s\n", cliConfigDir)
+
+	// Check for config file
+	configPath := filepath.Join(cliConfigDir, "config.yaml")
+	if _, err := os.Stat(configPath); err == nil {
+		fmt.Printf("Config File: %s\n", configPath)
+		// Try to load config
+		cfg, err := metasync.LoadConfig()
+		if err != nil {
+			fmt.Printf("Warning: failed to load config: %v\n", err)
+		} else {
+			fmt.Printf("API Endpoint: %s\n", cfg.APIEndpoint)
+		}
+	} else {
+		fmt.Printf("Config File: %s (not found)\n", configPath)
+	}
+
+	// Check for database
+	cliDBPath := filepath.Join(cliConfigDir, "ente-cli.db")
+	if _, err := os.Stat(cliDBPath); err == nil {
+		fmt.Printf("Database File: %s\n", cliDBPath)
+	} else {
+		fmt.Printf("Database File: %s (not found)\n", cliDBPath)
+	}
+
+	// Get device key
+	fmt.Println("\n--- Device Key ---")
+	deviceKey, err := metasync.GetDeviceKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting device key: %v\n", err)
+		fmt.Println("  You may need to set ENTE_CLI_SECRETS_PATH environment variable")
+	} else {
+		fmt.Printf("Device Key Length: %d bytes\n", len(deviceKey))
+		fmt.Printf("Device Key (base64): %s\n", base64.StdEncoding.EncodeToString(deviceKey))
+	}
 }
 
 // Export fileType for the hash command
