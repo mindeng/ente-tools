@@ -82,9 +82,17 @@ func runScan(cmd *cobra.Command, args []string) {
 
 	// Set up progress callback - use stderr and overwrite the same line
 	scanner.SetProgressCallback(func(stats *types.ScanStats, currentPath string) {
+		// Count actual duplicate groups (groups with more than 1 file)
+		duplicateGroups := 0
+		for _, dup := range stats.Duplicates {
+			if len(dup.Duplicates) > 0 {
+				duplicateGroups++
+			}
+		}
+
 		// Use \r to go to start of line, \033[K to clear to end of line
-		fmt.Fprintf(os.Stderr, "\r\033[KProcessing: %s | Files: %d | Updated: %d | Skipped: %d | Live Photos: %d",
-			currentPath, stats.TotalFiles, stats.UpdatedFiles, stats.SkippedFiles, stats.LivePhotos)
+		fmt.Fprintf(os.Stderr, "\r\033[KProcessing: %s | Files: %d | Updated: %d | Skipped: %d | Live Photos: %d | Duplicates: %d",
+			currentPath, stats.TotalFiles, stats.UpdatedFiles, stats.SkippedFiles, stats.LivePhotos, duplicateGroups)
 	})
 
 	// Scan directory

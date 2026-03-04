@@ -117,6 +117,15 @@ func FormatScanStats(stats *types.ScanStats, dbPath string) string {
 		stats.TotalFiles, stats.UpdatedFiles, stats.SkippedFiles))
 	sb.WriteString(fmt.Sprintf("Found %d Live Photos\n", stats.LivePhotos))
 
+	if stats.UnsupportedFiles > 0 {
+		// Sort extensions alphabetically
+		exts := make([]string, len(stats.UnsupportedExts))
+		copy(exts, stats.UnsupportedExts)
+		sort.Strings(exts)
+		sb.WriteString(fmt.Sprintf("Skipped %d unsupported files (extensions: %s)\n",
+			stats.UnsupportedFiles, strings.Join(exts, ", ")))
+	}
+
 	if len(stats.Duplicates) > 0 {
 		actualDuplicates := 0
 		for _, dup := range stats.Duplicates {

@@ -26,6 +26,8 @@ type Scanner struct {
 	// Progress tracking
 	lastProgressTime time.Time
 	currentDir        string
+	// Track unsupported file extensions
+	unsupportedExts map[string]bool
 }
 
 // New creates a new scanner for the given directory
@@ -36,10 +38,11 @@ func New(dir string) (*Scanner, error) {
 	}
 
 	return &Scanner{
-		dir:       dir,
-		db:        db,
-		duplicates: make(map[string]*types.DuplicateEntry),
+		dir:            dir,
+		db:             db,
+		duplicates:     make(map[string]*types.DuplicateEntry),
 		lastProgressTime: time.Now(),
+		unsupportedExts: make(map[string]bool),
 	}, nil
 }
 
@@ -125,6 +128,12 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 
 		// Check if this is a supported file type
 		if !livephoto.IsSupportedFile(filepath.Base(path)) {
+			// Track unsupported file extension
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != "" {
+				s.unsupportedExts[ext] = true
+			}
+			s.stats.UnsupportedFiles++
 			return nil
 		}
 
@@ -163,6 +172,11 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 		if len(dup.Duplicates) > 0 {
 			s.stats.Duplicates = append(s.stats.Duplicates, *dup)
 		}
+	}
+
+	// Convert unsupported extensions map to sorted slice
+	for ext := range s.unsupportedExts {
+		s.stats.UnsupportedExts = append(s.stats.UnsupportedExts, ext)
 	}
 
 	return &s.stats, nil

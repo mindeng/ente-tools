@@ -60,12 +60,14 @@ type DiffEntry struct {
 
 // ScanStats represents statistics from a directory scan
 type ScanStats struct {
-	TotalFiles    int
-	UpdatedFiles  int
-	SkippedFiles  int
-	LivePhotos    int
-	Duplicates    []DuplicateEntry
-	DBPath        string
+	TotalFiles       int
+	UpdatedFiles     int
+	SkippedFiles     int
+	LivePhotos       int
+	Duplicates       []DuplicateEntry
+	DBPath           string
+	UnsupportedFiles int
+	UnsupportedExts  []string
 }
 
 // DuplicateEntry represents a file with duplicates

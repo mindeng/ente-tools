@@ -156,7 +156,7 @@ func IsVideoFile(filePath string) bool {
 		".mkv":  true, ".webm": true, ".flv":  true,
 		".wmv":  true, ".3gp": true, ".3g2":  true,
 		".m4v":  true, ".ogv": true, ".ts":   true,
-		".mpg":  true, ".mpeg": true,
+		".mpg":  true, ".mpeg": true, ".qt":  true,
 	}
 	return videoExts[ext]
 }

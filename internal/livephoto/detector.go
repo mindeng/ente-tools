@@ -22,6 +22,7 @@ var (
 		"avi": true, "wmv": true, "flv": true,
 		"mkv": true, "webm": true, "3gp": true,
 		"3g2": true, "ogv": true, "mpg": true,
+		"qt":  true,
 	}
 
 	// Suffixes to remove from Live Photo file names
