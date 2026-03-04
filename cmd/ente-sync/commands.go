@@ -49,6 +49,7 @@ var debugCmd = &cobra.Command{
 var diffCmd = &cobra.Command{
 	Use:   "diff <dir>",
 	Short: "Find files not in ente library",
+	Long:  "Find files that exist locally but are not in ente library. Use --copy-to option to copy missing files to a target directory.",
 	Args:  cobra.ExactArgs(1),
 	Run:   runDiff,
 }
@@ -64,13 +65,16 @@ var uploadCmd = &cobra.Command{
 
 // Flags
 var (
-	accountFlag     string
-	appFlag         string
-	outputFlag      string
-	verboseFlag     bool
-	diffMetaDBFlag  string
-	diffVerboseFlag bool
-	uploadAlbumFlag string
+	accountFlag      string
+	appFlag          string
+	outputFlag       string
+	verboseFlag      bool
+	diffMetaDBFlag   string
+	diffVerboseFlag  bool
+	diffCopyToFlag   string
+	diffDryRunFlag   bool
+	diffWorkersFlag  int
+	uploadAlbumFlag  string
 )
 
 func init() {
@@ -97,6 +101,9 @@ func init() {
 	// Diff flags
 	diffCmd.Flags().StringVar(&diffMetaDBFlag, "meta-db", "", "Path to metasync database (default: ~/.ente/metasync.db)")
 	diffCmd.Flags().BoolVarP(&diffVerboseFlag, "verbose", "v", false, "Verbose output")
+	diffCmd.Flags().StringVar(&diffCopyToFlag, "copy-to", "", "Copy missing files to this directory, maintaining original structure")
+	diffCmd.Flags().BoolVarP(&diffDryRunFlag, "dry-run", "n", false, "Dry run - only show what would be copied")
+	diffCmd.Flags().IntVarP(&diffWorkersFlag, "workers", "w", 4, "Number of parallel copy workers (default: 4)")
 
 	// Upload flags
 	uploadCmd.Flags().StringVarP(&accountFlag, "account", "a", "", "Account email (required)")
@@ -358,6 +365,46 @@ func runDiff(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Check if we need to copy files
+	if diffCopyToFlag != "" {
+		absTargetDir, err := filepath.Abs(diffCopyToFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error resolving target path: %v\n", err)
+			os.Exit(1)
+		}
+
+		if diffDryRunFlag {
+			fmt.Printf("DRY RUN - No files will be copied\n\n")
+		}
+
+		fmt.Printf("Analyzing %s and copying to %s...\n", absDir, absTargetDir)
+		fmt.Printf("Using ente metadata from: %s\n", metaDBPath)
+		if diffVerboseFlag {
+			fmt.Printf("Using %d parallel workers\n\n", diffWorkersFlag)
+		} else {
+			fmt.Println()
+		}
+
+		// StreamCopyMissingFiles handles both analysis and copying in parallel
+		copyResult, err := findings.StreamCopyMissingFiles(findings.StreamCopyOptions{
+			SourceDir:  absDir,
+			TargetDir:  absTargetDir,
+			MetaDBPath: metaDBPath,
+			Verbose:    diffVerboseFlag,
+			DryRun:     diffDryRunFlag,
+			Workers:    diffWorkersFlag,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error during copy: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Print results
+		fmt.Print(findings.FormatStreamCopyResult(copyResult))
+		return
+	}
+
+	// No copy option - just analyze and display results
 	fmt.Printf("Analyzing %s...\n", absDir)
 	fmt.Printf("Using ente metadata from: %s\n\n", metaDBPath)
 

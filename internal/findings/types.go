@@ -15,6 +15,7 @@ type MissingResult struct {
 }
 
 // MissingFile represents a local file that is not in ente library
+// It can be a regular file or a Live Photo (which includes both image and video)
 type MissingFile struct {
 	// Relative path from the scanned directory
 	Path string
@@ -23,5 +24,17 @@ type MissingFile struct {
 	// File size in bytes
 	Size int64
 	// File modification time
+	ModTime time.Time
+	// For Live Photos: additional file paths (video component)
+	AdditionalPaths []string // Additional files to copy (e.g., video for Live Photos)
+	// For Live Photos: additional file info
+	AdditionalInfo []MissingFileInfo
+}
+
+// MissingFileInfo contains info about additional files in a group (e.g., Live Photo components)
+type MissingFileInfo struct {
+	Path    string
+	Hash    string
+	Size    int64
 	ModTime time.Time
 }
