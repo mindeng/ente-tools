@@ -77,11 +77,8 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 			return nil
 		}
 
-		// Skip hidden directories and the .ente-hashcmp directory
+		// Skip hidden directories and the .fhash directory
 		if strings.HasPrefix(filepath.Base(path), ".") {
-			if filepath.Base(path) != ".ente-hashcmp" {
-				return filepath.SkipDir
-			}
 			return filepath.SkipDir
 		}
 

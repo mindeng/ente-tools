@@ -7,12 +7,12 @@ import (
 
 // GetPath returns the path to the database file for a given directory
 func GetPath(dir string) string {
-	return filepath.Join(dir, ".ente-hashcmp", "db")
+	return filepath.Join(dir, ".fhash", "db")
 }
 
-// GetDirPath returns the path to the .ente-hashcmp directory
+// GetDirPath returns the path to the .fhash directory
 func GetDirPath(dir string) string {
-	return filepath.Join(dir, ".ente-hashcmp")
+	return filepath.Join(dir, ".fhash")
 }
 
 // String returns a formatted string representation of the database path
@@ -35,7 +35,7 @@ func (db *DB) Path() string {
 	return db.path
 }
 
-// DirPath returns the .ente-hashcmp directory path
+// DirPath returns the .fhash directory path
 func (db *DB) DirPath() string {
 	return GetDirPath(db.path)
 }

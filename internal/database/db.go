@@ -18,7 +18,7 @@ type DB struct {
 
 // Open opens or creates the database for a given directory
 func Open(dir string) (*DB, error) {
-	dbDir := filepath.Join(dir, ".ente-hashcmp")
+	dbDir := filepath.Join(dir, ".fhash")
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (db *DB) Close() error {
 
 // GetPath returns the path to the database file
 func GetPath(dir string) string {
-	return filepath.Join(dir, ".ente-hashcmp", "db")
+	return filepath.Join(dir, ".fhash", "db")
 }
 
 // PutFile stores or updates a file record
