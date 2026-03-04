@@ -80,12 +80,24 @@ func runScan(cmd *cobra.Command, args []string) {
 	}
 	defer scanner.Close()
 
+	// Set up progress callback - use stderr and overwrite the same line
+	scanner.SetProgressCallback(func(stats *types.ScanStats, currentPath string) {
+		// Use \r to go to start of line, \033[K to clear to end of line
+		fmt.Fprintf(os.Stderr, "\r\033[KProcessing: %s | Files: %d | Updated: %d | Skipped: %d | Live Photos: %d",
+			currentPath, stats.TotalFiles, stats.UpdatedFiles, stats.SkippedFiles, stats.LivePhotos)
+	})
+
 	// Scan directory
 	stats, err := scanner.Scan()
 	if err != nil {
+		// Clear the progress line before printing error
+		fmt.Printf("\r\033[K")
 		fmt.Fprintf(os.Stderr, "Error scanning directory: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Clear the progress line before printing final results
+	fmt.Printf("\r\033[K")
 
 	// Print results
 	fmt.Print(comparator.FormatScanStats(stats, scanner.GetDBPath()))

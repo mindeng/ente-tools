@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"ente-hashcmp/internal/database"
 	"ente-hashcmp/internal/hash"
@@ -12,12 +13,19 @@ import (
 	"ente-hashcmp/internal/types"
 )
 
+// ProgressCallback is called during scanning to report progress
+type ProgressCallback func(stats *types.ScanStats, currentPath string)
+
 // Scanner handles directory scanning and hash calculation
 type Scanner struct {
 	dir        string
 	db         *database.DB
 	stats      types.ScanStats
 	duplicates map[string]*types.DuplicateEntry
+	progress   ProgressCallback
+	// Progress tracking
+	lastProgressTime time.Time
+	currentDir        string
 }
 
 // New creates a new scanner for the given directory
@@ -31,7 +39,13 @@ func New(dir string) (*Scanner, error) {
 		dir:       dir,
 		db:        db,
 		duplicates: make(map[string]*types.DuplicateEntry),
+		lastProgressTime: time.Now(),
 	}, nil
+}
+
+// SetProgressCallback sets a callback function to be called during scanning
+func (s *Scanner) SetProgressCallback(callback ProgressCallback) {
+	s.progress = callback
 }
 
 // Close closes the scanner and its database
@@ -68,6 +82,10 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 			return filepath.SkipDir
 		}
 
+		// Update current directory for progress reporting
+		s.currentDir = filepath.Base(path)
+		s.reportProgress("scanning")
+
 		// Find Live Photo pairs in this directory
 		pairs, err := livephoto.FindLivePhotoPairs(path)
 		if err != nil {
@@ -95,6 +113,8 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 			if strings.HasPrefix(filepath.Base(path), ".") {
 				return filepath.SkipDir
 			}
+			// Update current directory for progress reporting
+			s.currentDir = filepath.Base(path)
 			return nil
 		}
 
@@ -108,8 +128,6 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 			return nil
 		}
 
-		s.stats.TotalFiles++
-
 		// Check if this file is part of a Live Photo
 		baseName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 		if pair, ok := livePhotoPairs[baseName]; ok {
@@ -117,20 +135,28 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 			fileType := livephoto.GetFileType(filepath.Base(path))
 			if fileType == types.FileTypeVideo {
 				// Process the entire Live Photo when we hit the video component
-				return s.processLivePhoto(pair, path)
+				currentPath := filepath.Base(path)
+				err = s.processLivePhoto(pair, path)
+				s.reportProgress(currentPath)
+				return err
 			}
 			// Skip the image component - it will be processed as part of the Live Photo
-			s.stats.SkippedFiles++
 			return nil
 		}
 
 		// Regular file processing
-		return s.processFile(path, info)
+		currentPath := filepath.Base(path)
+		err = s.processFile(path, info)
+		s.reportProgress(currentPath)
+		return err
 	})
 
 	if err != nil {
 		return nil, err
 	}
+
+	// Report final progress
+	s.reportProgress("complete")
 
 	// Convert duplicates map to slice - only include entries with actual duplicates
 	for _, dup := range s.duplicates {
@@ -144,6 +170,8 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 
 // processFile computes and stores hash for a regular file
 func (s *Scanner) processFile(path string, info os.FileInfo) error {
+	s.stats.TotalFiles++ // Count this file
+
 	// Get relative path
 	relPath, err := filepath.Rel(s.dir, path)
 	if err != nil {
@@ -195,6 +223,8 @@ func (s *Scanner) processFile(path string, info os.FileInfo) error {
 
 // processLivePhoto computes and stores hash for a Live Photo
 func (s *Scanner) processLivePhoto(pair livephoto.LivePhotoPair, videoPath string) error {
+	s.stats.TotalFiles++ // Count this Live Photo as one unit
+
 	// Get relative path for the image (primary path)
 	imageRelPath, err := filepath.Rel(s.dir, pair.ImagePath)
 	if err != nil {
@@ -281,4 +311,20 @@ func (s *Scanner) trackDuplicate(path string, fileHash string) {
 // GetDBPath returns the path to the database file
 func (s *Scanner) GetDBPath() string {
 	return database.GetPath(s.dir)
+}
+
+// reportProgress reports progress if enough time has passed since last report
+func (s *Scanner) reportProgress(currentPath string) {
+	if s.progress == nil {
+		return
+	}
+
+	// Only report progress every 500ms to avoid spamming output
+	now := time.Now()
+	if now.Sub(s.lastProgressTime) < 500*time.Millisecond {
+		return
+	}
+
+	s.lastProgressTime = now
+	s.progress(&s.stats, currentPath)
 }
