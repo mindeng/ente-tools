@@ -12,7 +12,7 @@ var rootCmd = &cobra.Command{
 	Short: "File hash comparison tool",
 	Long: `A command-line tool for calculating and comparing file hashes.
 Uses Blake2b algorithm with support for Live Photos, directory scanning,
-and bbolt database storage.`,
+and SQLite database storage.`,
 }
 
 func main() {

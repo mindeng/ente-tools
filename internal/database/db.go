@@ -1,26 +1,19 @@
 package database
 
 import (
-	"encoding/json"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"time"
 
-	"go.etcd.io/bbolt"
-
 	"ente-hashcmp/internal/types"
+
+	_ "modernc.org/sqlite"
 )
 
-const (
-	// filesBucket stores file hash records
-	filesBucket = "files"
-	// metadataBucket stores scan metadata
-	metadataBucket = "metadata"
-)
-
-// DB wraps bbolt database operations
+// DB wraps SQLite database operations
 type DB struct {
-	db *bbolt.DB
+	db *sql.DB
 }
 
 // Open opens or creates the database for a given directory
@@ -31,21 +24,22 @@ func Open(dir string) (*DB, error) {
 	}
 
 	dbPath := filepath.Join(dbDir, "db")
-	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create buckets if they don't exist
-	err = db.Update(func(tx *bbolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(filesBucket))
-		if err != nil {
-			return err
-		}
-		_, err = tx.CreateBucketIfNotExists([]byte(metadataBucket))
-		return err
-	})
-
+	// Create table if it doesn't exist
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS files (
+			key TEXT PRIMARY KEY,
+			hash TEXT NOT NULL,
+			size INTEGER NOT NULL,
+			mod_time INTEGER NOT NULL,
+			live_photo_image TEXT,
+			live_photo_video TEXT
+		);
+	`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -66,87 +60,100 @@ func GetPath(dir string) string {
 
 // PutFile stores or updates a file record
 func (db *DB) PutFile(key string, record *types.FileRecord) error {
-	data, err := json.Marshal(record)
-	if err != nil {
-		return err
+	var livePhotoImage, livePhotoVideo string
+	if record.LivePhotoParts != nil {
+		livePhotoImage = record.LivePhotoParts.Image
+		livePhotoVideo = record.LivePhotoParts.Video
 	}
 
-	return db.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(filesBucket))
-		return b.Put([]byte(key), data)
-	})
+	_, err := db.db.Exec(`
+		INSERT OR REPLACE INTO files (key, hash, size, mod_time, live_photo_image, live_photo_video)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, key, record.Hash, record.Size, record.ModTime.UnixNano(), livePhotoImage, livePhotoVideo)
+	return err
 }
 
 // GetFile retrieves a file record
 func (db *DB) GetFile(key string) (*types.FileRecord, error) {
-	var record types.FileRecord
+	var hash string
+	var size int64
+	var modTimeNano int64
+	var livePhotoImage, livePhotoVideo sql.NullString
 
-	err := db.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(filesBucket))
-		data := b.Get([]byte(key))
-		if data == nil {
-			return nil
-		}
-		return json.Unmarshal(data, &record)
-	})
+	err := db.db.QueryRow(`
+		SELECT hash, size, mod_time, live_photo_image, live_photo_video
+		FROM files WHERE key = ?
+	`, key).Scan(&hash, &size, &modTimeNano, &livePhotoImage, &livePhotoVideo)
 
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
 		return nil, err
 	}
 
-	return &record, nil
+	record := &types.FileRecord{
+		Hash:    hash,
+		Size:    size,
+		ModTime: time.Unix(0, modTimeNano),
+	}
+
+	if livePhotoImage.Valid || livePhotoVideo.Valid {
+		record.LivePhotoParts = &types.LivePhotoParts{
+			Image: livePhotoImage.String,
+			Video: livePhotoVideo.String,
+		}
+	}
+
+	return record, nil
 }
 
 // GetAllFiles returns all file records
 func (db *DB) GetAllFiles() (map[string]*types.FileRecord, error) {
 	result := make(map[string]*types.FileRecord)
 
-	err := db.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(filesBucket))
-		return b.ForEach(func(k, v []byte) error {
-			var record types.FileRecord
-			if err := json.Unmarshal(v, &record); err != nil {
-				return err
-			}
-			result[string(k)] = &record
-			return nil
-		})
-	})
+	rows, err := db.db.Query(`
+		SELECT key, hash, size, mod_time, live_photo_image, live_photo_video
+		FROM files
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-	return result, err
+	for rows.Next() {
+		var key, hash string
+		var size int64
+		var modTimeNano int64
+		var livePhotoImage, livePhotoVideo sql.NullString
+
+		if err := rows.Scan(&key, &hash, &size, &modTimeNano, &livePhotoImage, &livePhotoVideo); err != nil {
+			return nil, err
+		}
+
+		record := &types.FileRecord{
+			Hash:    hash,
+			Size:    size,
+			ModTime: time.Unix(0, modTimeNano),
+		}
+
+		if livePhotoImage.Valid || livePhotoVideo.Valid {
+			record.LivePhotoParts = &types.LivePhotoParts{
+				Image: livePhotoImage.String,
+				Video: livePhotoVideo.String,
+			}
+		}
+
+		result[key] = record
+	}
+
+	return result, rows.Err()
 }
 
 // DeleteFile removes a file record
 func (db *DB) DeleteFile(key string) error {
-	return db.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(filesBucket))
-		return b.Delete([]byte(key))
-	})
-}
-
-// PutMetadata stores scan metadata
-func (db *DB) PutMetadata(key string, value interface{}) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-
-	return db.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(metadataBucket))
-		return b.Put([]byte(key), data)
-	})
-}
-
-// GetMetadata retrieves scan metadata
-func (db *DB) GetMetadata(key string, value interface{}) error {
-	return db.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(metadataBucket))
-		data := b.Get([]byte(key))
-		if data == nil {
-			return nil
-		}
-		return json.Unmarshal(data, value)
-	})
+	_, err := db.db.Exec(`DELETE FROM files WHERE key = ?`, key)
+	return err
 }
 
 // NeedsRecalc determines if a file hash needs to be recalculated
@@ -179,17 +186,19 @@ type FileEntry struct {
 func (db *DB) GetAllFileEntries() (map[string]string, error) {
 	result := make(map[string]string)
 
-	err := db.db.View(func(tx *bbolt.Tx) error {
-		b := tx.Bucket([]byte(filesBucket))
-		return b.ForEach(func(k, v []byte) error {
-			var record types.FileRecord
-			if err := json.Unmarshal(v, &record); err != nil {
-				return err
-			}
-			result[string(k)] = record.Hash
-			return nil
-		})
-	})
+	rows, err := db.db.Query(`SELECT key, hash FROM files`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-	return result, err
+	for rows.Next() {
+		var key, hash string
+		if err := rows.Scan(&key, &hash); err != nil {
+			return nil, err
+		}
+		result[key] = hash
+	}
+
+	return result, rows.Err()
 }
