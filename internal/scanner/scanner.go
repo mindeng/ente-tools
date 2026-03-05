@@ -25,7 +25,7 @@ type Scanner struct {
 	progress   ProgressCallback
 	// Progress tracking
 	lastProgressTime time.Time
-	currentDir        string
+	currentDir       string
 	// Track unsupported file extensions
 	unsupportedExts map[string]bool
 }
@@ -38,11 +38,11 @@ func New(dir string) (*Scanner, error) {
 	}
 
 	return &Scanner{
-		dir:            dir,
-		db:             db,
-		duplicates:     make(map[string]*types.DuplicateEntry),
+		dir:              dir,
+		db:               db,
+		duplicates:       make(map[string]*types.DuplicateEntry),
 		lastProgressTime: time.Now(),
-		unsupportedExts: make(map[string]bool),
+		unsupportedExts:  make(map[string]bool),
 	}, nil
 }
 
@@ -96,7 +96,6 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +155,6 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 		s.reportProgress(currentPath)
 		return err
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -312,9 +310,9 @@ func (s *Scanner) trackDuplicate(path string, fileHash string) {
 	} else {
 		// New entry
 		s.duplicates[fileHash] = &types.DuplicateEntry{
-			Hash:       fileHash,
+			Hash:        fileHash,
 			PrimaryPath: path,
-			Duplicates: []string{},
+			Duplicates:  []string{},
 		}
 	}
 }

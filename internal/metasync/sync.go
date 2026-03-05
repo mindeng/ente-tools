@@ -87,6 +87,16 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 		return nil, fmt.Errorf("failed to get last sync time: %w", err)
 	}
 
+	syncType := "incremental"
+	if lastSyncTime == 0 {
+		syncType = "initial"
+	}
+
+	if opts.Verbose {
+		log.Printf("Starting %s sync (last sync time: %d)...", syncType, lastSyncTime)
+	}
+	log.Printf("Fetching collections from server...")
+
 	collections, err := apiClient.GetCollections(ctx, lastSyncTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get collections: %w", err)
@@ -94,6 +104,7 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 
 	// Count collections from API (these are the "diff" records)
 	result.CollectionsPulled = len(collections)
+	log.Printf("Fetched %d collection(s) from server", result.CollectionsPulled)
 
 	if opts.Verbose {
 		log.Printf("Found %d collections from API (since time: %d)", result.CollectionsPulled, lastSyncTime)
@@ -155,6 +166,7 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 
 		// Get files for this collection (incremental sync)
 		fileLastSyncTime := lastSyncTime
+		collectionFilesCount := 0
 		for {
 			files, hasMore, err := apiClient.GetFiles(ctx, coll.ID, fileLastSyncTime)
 			if err != nil {
@@ -164,6 +176,7 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 
 			// Count files from API (these are the "diff" records)
 			result.FilesPulled += len(files)
+			collectionFilesCount += len(files)
 
 			// Process files
 			for _, file := range files {
@@ -206,6 +219,9 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 			}
 
 			if !hasMore {
+				if collectionFilesCount > 0 {
+					log.Printf("Fetched %d file(s) from collection \"%s\"", collectionFilesCount, collName)
+				}
 				break
 			}
 		}
@@ -217,6 +233,8 @@ func Sync(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 	}
 
 	result.Duration = time.Since(startTime)
+
+	log.Printf("Sync completed: %d collection(s), %d file(s), took %s", result.CollectionsPulled, result.FilesPulled, result.Duration.Round(time.Millisecond))
 
 	return result, nil
 }
