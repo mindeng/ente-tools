@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,72 +62,177 @@ func (s *Scanner) DB() *database.DB {
 	return s.db
 }
 
+// fileInfo stores file information for Live Photo matching
+type fileInfo struct {
+	path     string
+	fileType types.FileType
+	size     int64
+	modTime  time.Time
+}
+
 // Scan scans the directory recursively, computing hashes for files
 func (s *Scanner) Scan() (*types.ScanStats, error) {
 	s.stats = types.ScanStats{
 		Duplicates: []types.DuplicateEntry{},
 	}
 
-	// First pass: find all Live Photo pairs in subdirectories
+	// First pass: find all Live Photo pairs in a single WalkDir
 	livePhotoPairs := make(map[string]livephoto.LivePhotoPair)
-	err := filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
+	// pendingFiles: dirPath -> baseName -> []fileInfo (files waiting for match)
+	pendingFiles := make(map[string]map[string][]*fileInfo)
+	maxAssetSize := int64(20 * 1024 * 1024) // 20MB
+
+	var currentDirPath string
+
+	err := filepath.WalkDir(s.dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() {
+
+		if d.IsDir() {
+			// Skip hidden directories and the .fhash directory
+			if strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+
+			// Detect directory change and release memory
+			if currentDirPath != "" && !strings.HasPrefix(path, currentDirPath+string(filepath.Separator)) {
+				// We've moved out of currentDirPath (and its subdirs), release its pendingFiles
+				delete(pendingFiles, currentDirPath)
+			}
+
+			currentDirPath = path
+			s.currentDir = d.Name()
+			s.reportProgress(fmt.Sprintf("finding Live Photos (%d): %s", len(livePhotoPairs), d.Name()))
 			return nil
 		}
 
-		// Skip hidden directories and the .fhash directory
-		if strings.HasPrefix(filepath.Base(path), ".") {
-			return filepath.SkipDir
+		// Skip hidden files
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
 		}
 
-		// Update current directory for progress reporting
-		s.currentDir = filepath.Base(path)
-		s.reportProgress("scanning")
+		// Check if this is a supported file type
+		if !livephoto.IsSupportedFile(d.Name()) {
+			// Track unsupported file extension
+			ext := strings.ToLower(filepath.Ext(d.Name()))
+			if ext != "" {
+				s.unsupportedExts[ext] = true
+			}
+			s.stats.UnsupportedFiles++
+			return nil
+		}
 
-		// Find Live Photo pairs in this directory
-		pairs, err := livephoto.FindLivePhotoPairs(path)
+		// Get file type
+		ft := livephoto.GetFileType(path)
+		if ft != types.FileTypeImage && ft != types.FileTypeVideo {
+			return nil
+		}
+
+		// Skip files not supported by Live Photo format (RAW formats etc.)
+		if !livephoto.IsLivePhotoSupportedFile(path) {
+			return nil
+		}
+
+		// Quick size check (get size without Stat for performance)
+		info, err := d.Info()
 		if err != nil {
-			return fmt.Errorf("failed to find Live Photo pairs in %s: %w", path, err)
+			return nil
 		}
-		for _, pair := range pairs {
-			// Store using image path as key for direct lookup
-			livePhotoPairs[pair.ImagePath] = pair
+		if info.Size() > maxAssetSize {
+			return nil
 		}
+
+		// Get directory path for grouping
+		dirPath := filepath.Dir(path)
+		baseName := livephoto.GetBaseName(path, ft, "")
+
+		// Initialize pending files map for this directory if needed
+		if pendingFiles[dirPath] == nil {
+			pendingFiles[dirPath] = make(map[string][]*fileInfo)
+		}
+
+		// Try to find a matching file in pending
+		pendingList := pendingFiles[dirPath][baseName]
+		matched := false
+		matchedIndex := -1
+
+		for i, match := range pendingList {
+			// Only match opposite type (image with video)
+			if match.fileType == ft {
+				continue
+			}
+
+			var imagePath, videoPath string
+			if ft == types.FileTypeImage {
+				imagePath = path
+				videoPath = match.path
+			} else {
+				imagePath = match.path
+				videoPath = path
+			}
+
+			// Verify with full AreLivePhotoAssets check
+			if livephoto.AreLivePhotoAssets(imagePath, videoPath) {
+				// Valid Live Photo pair found
+				livePhotoPairs[imagePath] = livephoto.LivePhotoPair{
+					ImagePath: imagePath,
+					VideoPath: videoPath,
+					BaseName:  baseName,
+				}
+				matched = true
+				matchedIndex = i
+				s.reportProgress(fmt.Sprintf("finding Live Photos (%d): %s", len(livePhotoPairs), d.Name()))
+				break
+			}
+		}
+
+		if matched && matchedIndex >= 0 {
+			// Remove the matched file from pending list
+			pendingList = append(pendingList[:matchedIndex], pendingList[matchedIndex+1:]...)
+			pendingFiles[dirPath][baseName] = pendingList
+		} else {
+			// Add to pending list
+			pendingFiles[dirPath][baseName] = append(pendingList, &fileInfo{
+				path:     path,
+				fileType: ft,
+				size:     info.Size(),
+				modTime:  info.ModTime(),
+			})
+		}
+
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Second pass: scan all files
-	err = filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
+	// Second pass: scan all files for hash computation
+	err = filepath.WalkDir(s.dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Skip directories
-		if info.IsDir() {
+		if d.IsDir() {
 			// Skip hidden directories
-			if strings.HasPrefix(filepath.Base(path), ".") {
-				return filepath.SkipDir
+			if strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
 			}
 			// Update current directory for progress reporting
-			s.currentDir = filepath.Base(path)
+			s.currentDir = d.Name()
 			return nil
 		}
 
 		// Skip hidden files
-		if strings.HasPrefix(filepath.Base(path), ".") {
+		if strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
 
 		// Check if this is a supported file type
-		if !livephoto.IsSupportedFile(filepath.Base(path)) {
+		if !livephoto.IsSupportedFile(d.Name()) {
 			// Track unsupported file extension
-			ext := strings.ToLower(filepath.Ext(path))
+			ext := strings.ToLower(filepath.Ext(d.Name()))
 			if ext != "" {
 				s.unsupportedExts[ext] = true
 			}
@@ -138,7 +244,7 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 		if pair, ok := livePhotoPairs[path]; ok {
 			// This file is the image component of a Live Photo
 			// Process the entire Live Photo (we need the video for the hash)
-			currentPath := filepath.Base(path)
+			currentPath := d.Name()
 			err = s.processLivePhoto(pair)
 			s.reportProgress(currentPath)
 			return err
@@ -154,8 +260,12 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 		}
 
 		// Regular file processing
-		currentPath := filepath.Base(path)
-		err = s.processFile(path, info)
+		currentPath := d.Name()
+		fileInfo, err := d.Info()
+		if err != nil {
+			return err
+		}
+		err = s.processFile(path, fileInfo)
 		s.reportProgress(currentPath)
 		return err
 	})

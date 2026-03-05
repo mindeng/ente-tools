@@ -2,7 +2,6 @@ package livephoto
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -88,61 +87,6 @@ func GetLivePhotoInfo(pair LivePhotoPair) (*LivePhotoInfo, error) {
 		ImageModTime: imageInfo.ModTime(),
 		VideoModTime: videoInfo.ModTime(),
 	}, nil
-}
-
-// FindLivePhotoPairs finds all Live Photo pairs in a directory
-// Uses the full AreLivePhotoAssets check (size, time, name matching)
-// Returns a map of base names to their image and video paths
-func FindLivePhotoPairs(dir string) (map[string]LivePhotoPair, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Separate images and videos
-	var images []string
-	var videos []string
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		filename := entry.Name()
-		if !IsSupportedFile(filename) {
-			continue
-		}
-
-		filePath := filepath.Join(dir, filename)
-		ft := GetFileType(filePath)
-		switch ft {
-		case types.FileTypeImage:
-			images = append(images, filePath)
-		case types.FileTypeVideo:
-			videos = append(videos, filePath)
-		}
-	}
-
-	// Find pairs using the full AreLivePhotoAssets check
-	pairs := make(map[string]LivePhotoPair)
-	for _, imagePath := range images {
-		for _, videoPath := range videos {
-			if AreLivePhotoAssets(imagePath, videoPath) {
-				// Get the base name from image path
-				baseName := strings.TrimSuffix(filepath.Base(imagePath), filepath.Ext(imagePath))
-				// Also check for suffixes
-				baseName = RemovePotentialLivePhotoSuffix(baseName, filepath.Ext(videoPath))
-				pairs[baseName] = LivePhotoPair{
-					ImagePath: imagePath,
-					VideoPath: videoPath,
-					BaseName:  baseName,
-				}
-				break // Each image can only match one video
-			}
-		}
-	}
-
-	return pairs, nil
 }
 
 // ShouldSkipLivePhoto returns true if a file is part of a Live Photo and should be skipped

@@ -14,14 +14,27 @@ import (
 )
 
 var (
-	// Supported image extensions
-	imageExts = map[string]bool{
+	// Live Photo supported image extensions (limited to common formats)
+	livePhotoImageExts = map[string]bool{
 		"heic": true, "heif": true, "jpeg": true,
-		"jpg": true, "png": true, "gif": true,
-		"bmp": true, "tiff": true, "webp": true,
+		"jpg":  true, "png":  true,  "gif":  true,
+		"bmp":  true, "tiff": true, "webp": true,
 	}
 
-	// Supported video extensions
+	// Live Photo supported video extensions
+	livePhotoVideoExts = map[string]bool{
+		"mov": true, "mp4": true, "m4v": true,
+	}
+
+	// General image extensions (includes RAW formats)
+	imageExts = map[string]bool{
+		"heic": true, "heif": true, "jpeg": true,
+		"jpg":  true, "png":  true,  "gif":  true,
+		"bmp":  true, "tiff": true, "webp": true,
+		"arw":  true, "dng":  true,  "nef":  true,
+	}
+
+	// General video extensions
 	videoExts = map[string]bool{
 		"mov": true, "mp4": true, "m4v": true,
 		"avi": true, "wmv": true, "flv": true,
@@ -167,6 +180,29 @@ func GetFileType(filename string) types.FileType {
 func IsSupportedFile(filename string) bool {
 	ft := GetFileType(filename)
 	return ft == types.FileTypeImage || ft == types.FileTypeVideo
+}
+
+// IsLivePhotoSupportedFile returns true if the file could be part of a Live Photo
+// (more restrictive than IsSupportedFile, as Live Photos have limited format support)
+func IsLivePhotoSupportedFile(filename string) bool {
+	ft := GetFileType(filename)
+	if ft == types.FileTypeUnknown {
+		return false
+	}
+
+	ext := strings.ToLower(path.Ext(filename))
+	if len(ext) > 0 {
+		ext = ext[1:] // Remove the dot
+	}
+
+	// Only check supported Live Photo extensions
+	if ft == types.FileTypeImage {
+		return livePhotoImageExts[ext]
+	}
+	if ft == types.FileTypeVideo {
+		return livePhotoVideoExts[ext]
+	}
+	return false
 }
 
 // GetBaseName returns the base name of a file after removing Live Photo suffixes
