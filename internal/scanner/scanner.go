@@ -91,8 +91,9 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 		if err != nil {
 			return fmt.Errorf("failed to find Live Photo pairs in %s: %w", path, err)
 		}
-		for baseName, pair := range pairs {
-			livePhotoPairs[baseName] = pair
+		for _, pair := range pairs {
+			// Store using image path as key for direct lookup
+			livePhotoPairs[pair.ImagePath] = pair
 		}
 		return nil
 	})
@@ -134,19 +135,22 @@ func (s *Scanner) Scan() (*types.ScanStats, error) {
 		}
 
 		// Check if this file is part of a Live Photo
-		baseName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-		if pair, ok := livePhotoPairs[baseName]; ok {
-			// This file is part of a Live Photo
-			fileType := livephoto.GetFileType(filepath.Base(path))
-			if fileType == types.FileTypeVideo {
-				// Process the entire Live Photo when we hit the video component
-				currentPath := filepath.Base(path)
-				err = s.processLivePhoto(pair, path)
-				s.reportProgress(currentPath)
-				return err
+		if pair, ok := livePhotoPairs[path]; ok {
+			// This file is the image component of a Live Photo
+			// Process the entire Live Photo (we need the video for the hash)
+			currentPath := filepath.Base(path)
+			err = s.processLivePhoto(pair)
+			s.reportProgress(currentPath)
+			return err
+		}
+
+		// Check if this file is the video component of a Live Photo
+		for _, pair := range livePhotoPairs {
+			if pair.VideoPath == path {
+				// This is the video, but we process Live Photo when we hit the image
+				// Skip this file as it will be processed with the image
+				return nil
 			}
-			// Skip the image component - it will be processed as part of the Live Photo
-			return nil
 		}
 
 		// Regular file processing
@@ -231,7 +235,7 @@ func (s *Scanner) processFile(path string, info os.FileInfo) error {
 }
 
 // processLivePhoto computes and stores hash for a Live Photo
-func (s *Scanner) processLivePhoto(pair livephoto.LivePhotoPair, videoPath string) error {
+func (s *Scanner) processLivePhoto(pair livephoto.LivePhotoPair) error {
 	s.stats.TotalFiles++ // Count this Live Photo as one unit
 
 	// Get relative path for the image (primary path)
@@ -261,9 +265,25 @@ func (s *Scanner) processLivePhoto(pair livephoto.LivePhotoPair, videoPath strin
 	}
 
 	if !needsRecalc {
-		s.stats.SkippedFiles++
-		s.stats.LivePhotos++
-		return nil
+		// Check if the database record matches the current video path
+		// This is important because multiple videos might share the same base name
+		// but match to different images due to Live Photo suffix removal
+		record, err := s.db.GetFile(imageRelPath)
+		if err == nil && record != nil && record.LivePhotoParts != nil {
+			videoRelPath := filepath.Join(filepath.Dir(imageRelPath), filepath.Base(pair.VideoPath))
+			if record.LivePhotoParts.Video == videoRelPath {
+				// Same video, can skip
+				s.stats.SkippedFiles++
+				s.stats.LivePhotos++
+				return nil
+			}
+			// Different video with same base name, need to recalculate
+		} else {
+			// No LivePhotoParts or no record, can skip
+			s.stats.SkippedFiles++
+			s.stats.LivePhotos++
+			return nil
+		}
 	}
 
 	// Compute Live Photo hash

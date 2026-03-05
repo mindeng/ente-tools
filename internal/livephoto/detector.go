@@ -1,11 +1,16 @@
 package livephoto
 
 import (
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
+	"ente-hashcmp/internal/exif"
 	"ente-hashcmp/internal/types"
+	"ente-hashcmp/internal/video"
 )
 
 var (
@@ -28,6 +33,120 @@ var (
 	// Suffixes to remove from Live Photo file names
 	suffixes = []string{"_3", "_HVEC", "_hvec"}
 )
+
+// AreLivePhotoAssets checks if two files form a Live Photo pair
+// Based on the logic from ente web's areLivePhotoAssets function
+func AreLivePhotoAssets(filePath1, filePath2 string) bool {
+	ft1 := GetFileType(filePath1)
+	ft2 := GetFileType(filePath2)
+
+	// Must be one image and one video
+	if ft1 == types.FileTypeImage && ft2 == types.FileTypeVideo {
+		return checkLivePhotoPair(filePath1, filePath2)
+	}
+	if ft1 == types.FileTypeVideo && ft2 == types.FileTypeImage {
+		return checkLivePhotoPair(filePath2, filePath1)
+	}
+	return false
+}
+
+// checkLivePhotoPair performs the full check for a Live Photo pair
+func checkLivePhotoPair(imagePath, videoPath string) bool {
+	// Get file names
+	imageName := filepath.Base(imagePath)
+	videoName := filepath.Base(videoPath)
+	imageExt := strings.ToLower(filepath.Ext(imagePath))
+	videoExt := strings.ToLower(filepath.Ext(videoPath))
+
+	// Remove potential Live Photo suffixes
+	imagePrunedName := removePotentialLivePhotoSuffix(
+		strings.TrimSuffix(imageName, imageExt),
+		videoExt,
+	)
+	videoPrunedName := removePotentialLivePhotoSuffix(
+		strings.TrimSuffix(videoName, videoExt),
+		"", // videos don't need extra suffix removal
+	)
+
+	// File names must match after pruning
+	if imagePrunedName != videoPrunedName {
+		return false
+	}
+
+	// Check file sizes (max 20MB per asset)
+	maxAssetSize := int64(20 * 1024 * 1024) // 20MB
+	imageInfo, err := os.Stat(imagePath)
+	if err != nil {
+		return false
+	}
+	videoInfo, err := os.Stat(videoPath)
+	if err != nil {
+		return false
+	}
+
+	if imageInfo.Size() > maxAssetSize || videoInfo.Size() > maxAssetSize {
+		return false
+	}
+
+	// Get creation times from EXIF (for image) and video metadata (for video)
+	imageCreationTime, err := exif.GetCreationTime(imagePath)
+	if err != nil {
+		// Fall back to modTime if EXIF fails
+		imageCreationTime = imageInfo.ModTime()
+	}
+
+	// Get video creation time from metadata
+	videoCreationTime, err := video.GetCreationTime(videoPath)
+	if err != nil {
+		// Fall back to modTime if video metadata extraction fails
+		videoCreationTime = videoInfo.ModTime()
+	}
+
+	// Check that creation times are within 1 day
+	threshold := 24 * time.Hour
+	timeDiff := imageCreationTime.Sub(videoCreationTime)
+	if timeDiff < 0 {
+		timeDiff = -timeDiff
+	}
+
+	// Only check time difference if both times are non-zero
+	if !imageCreationTime.IsZero() && !videoCreationTime.IsZero() {
+		if timeDiff > threshold {
+			return false
+		}
+	}
+
+	return true
+}
+
+// RemovePotentialLivePhotoSuffix removes Live Photo suffixes from a file name
+// Based on ente web's removePotentialLivePhotoSuffix function
+// Exported for use in other packages
+func RemovePotentialLivePhotoSuffix(name, suffix string) string {
+	// Check for _3 suffix
+	if strings.HasSuffix(name, "_3") {
+		return strings.TrimSuffix(name, "_3")
+	}
+
+	// Check for _HVEC suffix (case-insensitive)
+	if strings.HasSuffix(strings.ToUpper(name), "_HVEC") {
+		return strings.TrimSuffix(strings.ToUpper(name), "_HVEC")
+	}
+
+	// Check for custom suffix (e.g., .mp4 for Google Live Photos)
+	if suffix != "" {
+		if strings.HasSuffix(strings.ToLower(name), strings.ToLower(suffix)) {
+			return strings.TrimSuffix(strings.ToLower(name), strings.ToLower(suffix))
+		}
+	}
+
+	return name
+}
+
+// removePotentialLivePhotoSuffix is the private version
+func removePotentialLivePhotoSuffix(name, suffix string) string {
+	return RemovePotentialLivePhotoSuffix(name, suffix)
+}
 
 // GetFileType determines the type of file based on its extension
 func GetFileType(filename string) types.FileType {
