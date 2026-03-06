@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"ente-tools/internal/database"
-	"ente-tools/internal/hash"
-	"ente-tools/internal/livephoto"
-	"ente-tools/internal/types"
+	"github.com/mindeng/ente-tools/internal/database"
+	"github.com/mindeng/ente-tools/internal/hash"
+	"github.com/mindeng/ente-tools/internal/livephoto"
+	"github.com/mindeng/ente-tools/internal/types"
 )
 
 // ProgressCallback is called during scanning to report progress

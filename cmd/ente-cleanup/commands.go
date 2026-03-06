@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	enteHashcmp "ente-tools/internal/storage"
+	enteHashcmp "github.com/mindeng/ente-tools/internal/storage"
 )
 
 var (

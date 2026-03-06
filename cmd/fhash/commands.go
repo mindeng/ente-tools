@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ente-tools/internal/comparator"
-	"ente-tools/internal/database"
-	"ente-tools/internal/hash"
-	"ente-tools/internal/livephoto"
-	"ente-tools/internal/scanner"
-	"ente-tools/internal/types"
-	"ente-tools/pkg/db"
+	"github.com/mindeng/ente-tools/internal/comparator"
+	"github.com/mindeng/ente-tools/internal/database"
+	"github.com/mindeng/ente-tools/internal/hash"
+	"github.com/mindeng/ente-tools/internal/livephoto"
+	"github.com/mindeng/ente-tools/internal/scanner"
+	"github.com/mindeng/ente-tools/internal/types"
+	"github.com/mindeng/ente-tools/pkg/db"
 )
 
 var scanCmd = &cobra.Command{

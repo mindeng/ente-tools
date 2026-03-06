@@ -1,4 +1,4 @@
-module ente-tools
+module github.com/mindeng/ente-tools
 
 go 1.24.0
 

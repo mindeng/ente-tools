@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"ente-tools/internal/types"
+	"github.com/mindeng/ente-tools/internal/types"
 )
 
 // Compare compares two directories based on their hash sets (not paths)

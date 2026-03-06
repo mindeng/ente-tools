@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"ente-tools/internal/types"
+	"github.com/mindeng/ente-tools/internal/types"
 
 	_ "modernc.org/sqlite"
 )

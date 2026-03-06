@@ -11,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ente-tools/internal/findings"
-	"ente-tools/internal/hash"
-	"ente-tools/internal/metasync"
-	"ente-tools/internal/upload"
+	"github.com/mindeng/ente-tools/internal/findings"
+	"github.com/mindeng/ente-tools/internal/hash"
+	"github.com/mindeng/ente-tools/internal/metasync"
+	"github.com/mindeng/ente-tools/internal/upload"
 )
 
 // Accounts command

@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ente-tools/internal/database"
-	"ente-tools/internal/metasync"
+	"github.com/mindeng/ente-tools/internal/database"
+	"github.com/mindeng/ente-tools/internal/metasync"
 )
 
 // AnalyzeOptions holds configuration for the analysis

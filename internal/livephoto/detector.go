@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"ente-tools/internal/exif"
-	"ente-tools/internal/types"
-	"ente-tools/internal/video"
+	"github.com/mindeng/ente-tools/internal/exif"
+	"github.com/mindeng/ente-tools/internal/types"
+	"github.com/mindeng/ente-tools/internal/video"
 )
 
 var (

@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ente-tools/internal/hash"
-	"ente-tools/internal/livephoto"
-	"ente-tools/internal/types"
+	"github.com/mindeng/ente-tools/internal/hash"
+	"github.com/mindeng/ente-tools/internal/livephoto"
+	"github.com/mindeng/ente-tools/internal/types"
 )
 
 // LivePhotoComponents represents the components of a live photo

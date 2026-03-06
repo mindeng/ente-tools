@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"ente-tools/internal/hash"
-	"ente-tools/internal/types"
+	"github.com/mindeng/ente-tools/internal/hash"
+	"github.com/mindeng/ente-tools/internal/types"
 )
 
 // LivePhotoPair represents an image and video file that form a Live Photo

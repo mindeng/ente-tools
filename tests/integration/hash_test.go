@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"ente-tools/internal/hash"
-	"ente-tools/internal/livephoto"
+	"github.com/mindeng/ente-tools/internal/hash"
+	"github.com/mindeng/ente-tools/internal/livephoto"
 )
 
 // MetaFile represents the structure of Ente metadata JSON files
