@@ -242,7 +242,7 @@ hash = imageHash + ":" + videoHash
 
 ## License
 
-MIT License
+This project is licensed under the GNU Affero General Public License Version 3 (AGPL-3.0). See [LICENSE](LICENSE) for details.
 
 ## Contributing
 
