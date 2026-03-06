@@ -41,7 +41,13 @@ func CalculateLivePhotoHash(imagePath, videoPath string) (string, error) {
 		return "", err
 	}
 
-	return imageHash + ":" + videoHash, nil
+	return CombineHashes(imageHash, videoHash), nil
+}
+
+// CombineHashes combines two hashes into a Live Photo hash
+// Format: "imageHash:videoHash"
+func CombineHashes(imageHash, videoHash string) string {
+	return imageHash + ":" + videoHash
 }
 
 // LivePhotoInfo contains information about a Live Photo's components

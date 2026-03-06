@@ -4,3 +4,4 @@ testdata/
 /ente-sync
 /ente-hashcmp
 bin/*
+/fhash

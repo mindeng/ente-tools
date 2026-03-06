@@ -32,7 +32,7 @@ func AnalyzeMissing(opts AnalyzeOptions) (*MissingResult, error) {
 	defer localDB.Close()
 
 	// Get all file entries from local database
-	localFiles, err := localDB.GetAllFileEntries()
+	localFiles, err := localDB.GetAllFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get local file hashes: %w", err)
 	}
@@ -58,19 +58,66 @@ func AnalyzeMissing(opts AnalyzeOptions) (*MissingResult, error) {
 		fmt.Printf("Found %d files in ente library\n", len(enteHashes))
 	}
 
+	// Build a map of Live Photo component paths -> combined hash
+	// This helps us check if a component's Live Photo is in ente
+	componentToLivePhotoHash := make(map[string]string)
+	for relPath, record := range localFiles {
+		if record.LivePhotoParts != nil {
+			// This record represents a Live Photo
+			// Map both components to the combined hash
+			componentToLivePhotoHash[relPath] = record.Hash
+			if record.LivePhotoParts.Video != "" {
+				componentToLivePhotoHash[record.LivePhotoParts.Video] = record.Hash
+			}
+		}
+	}
+
 	// Compare and find missing files
 	result := &MissingResult{
 		MissingFiles: []MissingFile{},
 	}
 
-	for relPath, hash := range localFiles {
-		if !enteHashes[hash] {
-			// File is missing from ente
-			result.MissingFiles = append(result.MissingFiles, MissingFile{
-				Path: relPath,
-				Hash: hash,
-			})
+	for relPath, record := range localFiles {
+		// First, check if the file's hash is in ente
+		if enteHashes[record.Hash] {
+			continue // File exists in Ente
 		}
+
+		// Check if this file is part of a Live Photo that exists in ente
+		if livePhotoHash, ok := componentToLivePhotoHash[relPath]; ok {
+			if enteHashes[livePhotoHash] {
+				continue // Live Photo exists in Ente, skip this component
+			}
+		}
+
+		// File is missing from ente
+		missingFile := MissingFile{
+			Path:    relPath,
+			Hash:    record.Hash,
+			Size:    record.Size,
+			ModTime: record.ModTime,
+		}
+
+		// If this is a Live Photo image and the video is also missing, include both
+		if record.LivePhotoParts != nil && record.LivePhotoParts.Video != "" {
+			videoRecord, ok := localFiles[record.LivePhotoParts.Video]
+			if ok {
+				// Check if video is also missing
+				if !enteHashes[videoRecord.Hash] {
+					missingFile.AdditionalPaths = []string{record.LivePhotoParts.Video}
+					missingFile.AdditionalInfo = []MissingFileInfo{
+						{
+							Path:    record.LivePhotoParts.Video,
+							Hash:    videoRecord.Hash,
+							Size:    videoRecord.Size,
+							ModTime: videoRecord.ModTime,
+						},
+					}
+				}
+			}
+		}
+
+		result.MissingFiles = append(result.MissingFiles, missingFile)
 	}
 
 	result.TotalFiles = len(localFiles)
@@ -116,7 +163,7 @@ func StreamCopyMissingFiles(opts StreamCopyOptions) (*StreamCopyResult, error) {
 	defer localDB.Close()
 
 	// Get all file entries from local database
-	localFiles, err := localDB.GetAllFileEntries()
+	localFiles, err := localDB.GetAllFiles()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get local file hashes: %w", err)
 	}
@@ -142,15 +189,59 @@ func StreamCopyMissingFiles(opts StreamCopyOptions) (*StreamCopyResult, error) {
 		fmt.Printf("Found %d files in ente library\n", len(enteHashes))
 	}
 
+	// Build a map of Live Photo component paths -> combined hash
+	componentToLivePhotoHash := make(map[string]string)
+	for relPath, record := range localFiles {
+		if record.LivePhotoParts != nil {
+			componentToLivePhotoHash[relPath] = record.Hash
+			if record.LivePhotoParts.Video != "" {
+				componentToLivePhotoHash[record.LivePhotoParts.Video] = record.Hash
+			}
+		}
+	}
+
 	// Find missing files
 	var missingFiles []MissingFile
-	for relPath, hash := range localFiles {
-		if !enteHashes[hash] {
-			missingFiles = append(missingFiles, MissingFile{
-				Path: relPath,
-				Hash: hash,
-			})
+	for relPath, record := range localFiles {
+		// Check if the file's hash is in ente
+		if enteHashes[record.Hash] {
+			continue
 		}
+
+		// Check if this file is part of a Live Photo that exists in ente
+		if livePhotoHash, ok := componentToLivePhotoHash[relPath]; ok {
+			if enteHashes[livePhotoHash] {
+				continue
+			}
+		}
+
+		// File is missing from ente
+		missingFile := MissingFile{
+			Path:    relPath,
+			Hash:    record.Hash,
+			Size:    record.Size,
+			ModTime: record.ModTime,
+		}
+
+		// If this is a Live Photo image and the video is also missing, include both
+		if record.LivePhotoParts != nil && record.LivePhotoParts.Video != "" {
+			videoRecord, ok := localFiles[record.LivePhotoParts.Video]
+			if ok {
+				if !enteHashes[videoRecord.Hash] {
+					missingFile.AdditionalPaths = []string{record.LivePhotoParts.Video}
+					missingFile.AdditionalInfo = []MissingFileInfo{
+						{
+							Path:    record.LivePhotoParts.Video,
+							Hash:    videoRecord.Hash,
+							Size:    videoRecord.Size,
+							ModTime: videoRecord.ModTime,
+						},
+					}
+				}
+			}
+		}
+
+		missingFiles = append(missingFiles, missingFile)
 	}
 
 	// Channels for streaming
