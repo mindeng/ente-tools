@@ -11,10 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ente-hashcmp/internal/findings"
-	"ente-hashcmp/internal/hash"
-	"ente-hashcmp/internal/metasync"
-	"ente-hashcmp/internal/upload"
+	"ente-tools/internal/findings"
+	"ente-tools/internal/hash"
+	"ente-tools/internal/metasync"
+	"ente-tools/internal/upload"
 )
 
 // Accounts command

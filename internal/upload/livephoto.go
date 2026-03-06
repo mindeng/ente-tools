@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ente-hashcmp/internal/hash"
-	"ente-hashcmp/internal/livephoto"
-	"ente-hashcmp/internal/types"
+	"ente-tools/internal/hash"
+	"ente-tools/internal/livephoto"
+	"ente-tools/internal/types"
 )
 
 // LivePhotoComponents represents the components of a live photo

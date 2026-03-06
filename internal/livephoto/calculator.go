@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"ente-hashcmp/internal/hash"
-	"ente-hashcmp/internal/types"
+	"ente-tools/internal/hash"
+	"ente-tools/internal/types"
 )
 
 // LivePhotoPair represents an image and video file that form a Live Photo

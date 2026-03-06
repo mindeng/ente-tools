@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ente-hashcmp/internal/comparator"
-	"ente-hashcmp/internal/database"
-	"ente-hashcmp/internal/hash"
-	"ente-hashcmp/internal/livephoto"
-	"ente-hashcmp/internal/scanner"
-	"ente-hashcmp/internal/types"
-	"ente-hashcmp/pkg/db"
+	"ente-tools/internal/comparator"
+	"ente-tools/internal/database"
+	"ente-tools/internal/hash"
+	"ente-tools/internal/livephoto"
+	"ente-tools/internal/scanner"
+	"ente-tools/internal/types"
+	"ente-tools/pkg/db"
 )
 
 var scanCmd = &cobra.Command{

@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"ente-hashcmp/internal/database"
-	"ente-hashcmp/internal/metasync"
+	"ente-tools/internal/database"
+	"ente-tools/internal/metasync"
 )
 
 // AnalyzeOptions holds configuration for the analysis

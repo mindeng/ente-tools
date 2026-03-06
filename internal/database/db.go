@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"ente-hashcmp/internal/types"
+	"ente-tools/internal/types"
 
 	_ "modernc.org/sqlite"
 )

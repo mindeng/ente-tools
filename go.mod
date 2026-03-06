@@ -1,4 +1,4 @@
-module ente-hashcmp
+module ente-tools
 
 go 1.24.0
 

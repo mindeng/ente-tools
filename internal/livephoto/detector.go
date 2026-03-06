@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"ente-hashcmp/internal/exif"
-	"ente-hashcmp/internal/types"
-	"ente-hashcmp/internal/video"
+	"ente-tools/internal/exif"
+	"ente-tools/internal/types"
+	"ente-tools/internal/video"
 )
 
 var (

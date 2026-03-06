@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"ente-hashcmp/internal/database"
-	"ente-hashcmp/internal/hash"
-	"ente-hashcmp/internal/livephoto"
-	"ente-hashcmp/internal/types"
+	"ente-tools/internal/database"
+	"ente-tools/internal/hash"
+	"ente-tools/internal/livephoto"
+	"ente-tools/internal/types"
 )
 
 // ProgressCallback is called during scanning to report progress
