@@ -363,10 +363,20 @@ func copyWorker(opts StreamCopyOptions, ch <-chan MissingFile, results chan<- Co
 	}
 }
 
-// copySingleFile copies a single file
+// copySingleFile copies a single file with atomic write semantics
 func copySingleFile(opts StreamCopyOptions, mfPath string, mf MissingFile) CopyOperation {
 	srcPath := filepath.Join(opts.SourceDir, mfPath)
 	dstPath := filepath.Join(opts.TargetDir, mfPath)
+
+	// Check if source file exists and get info
+	srcInfo, err := os.Stat(srcPath)
+	if err != nil {
+		return CopyOperation{
+			Path:   mfPath,
+			Status: CopyStatusFailed,
+			Err:    fmt.Errorf("source file not accessible: %w", err),
+		}
+	}
 
 	// Ensure target directory exists
 	dstDir := filepath.Dir(dstPath)
@@ -374,25 +384,20 @@ func copySingleFile(opts StreamCopyOptions, mfPath string, mf MissingFile) CopyO
 		return CopyOperation{
 			Path:   mfPath,
 			Status: CopyStatusFailed,
-			Err:    fmt.Errorf("failed to create directory: %w", err),
+			Err:    fmt.Errorf("failed to create target directory: %w", err),
 		}
 	}
 
-	// Check if source file exists
-	if _, err := os.Stat(srcPath); err != nil {
-		return CopyOperation{
-			Path:   mfPath,
-			Status: CopyStatusFailed,
-			Err:    fmt.Errorf("source file not found: %w", err),
+	// Check if destination already exists with same size
+	if dstInfo, err := os.Stat(dstPath); err == nil {
+		// If file exists with same size, skip it
+		if dstInfo.Size() == srcInfo.Size() {
+			return CopyOperation{
+				Path:   mfPath,
+				Status: CopyStatusSkipped,
+			}
 		}
-	}
-
-	// Check if destination already exists
-	if _, err := os.Stat(dstPath); err == nil {
-		return CopyOperation{
-			Path:   mfPath,
-			Status: CopyStatusSkipped,
-		}
+		// File exists but with different size - will be overwritten
 	}
 
 	if opts.DryRun {
@@ -402,7 +407,7 @@ func copySingleFile(opts StreamCopyOptions, mfPath string, mf MissingFile) CopyO
 		}
 	}
 
-	// Copy file
+	// Copy file with atomic write
 	if err := copyFileContent(srcPath, dstPath); err != nil {
 		return CopyOperation{
 			Path:   mfPath,
@@ -411,9 +416,30 @@ func copySingleFile(opts StreamCopyOptions, mfPath string, mf MissingFile) CopyO
 		}
 	}
 
-	// Set modification time
-	if err := os.Chtimes(dstPath, mf.ModTime, mf.ModTime); err != nil && opts.Verbose {
-		// Just log, don't fail
+	// Verify the copied file size matches source
+	dstInfo, err := os.Stat(dstPath)
+	if err != nil {
+		return CopyOperation{
+			Path:   mfPath,
+			Status: CopyStatusFailed,
+			Err:    fmt.Errorf("failed to verify destination file: %w", err),
+		}
+	}
+	if dstInfo.Size() != srcInfo.Size() {
+		os.Remove(dstPath) // Clean up incomplete file
+		return CopyOperation{
+			Path:   mfPath,
+			Status: CopyStatusFailed,
+			Err:    fmt.Errorf("size mismatch after copy: source=%d, destination=%d", srcInfo.Size(), dstInfo.Size()),
+		}
+	}
+
+	// Set modification time to match source
+	if !mf.ModTime.IsZero() {
+		if err := os.Chtimes(dstPath, mf.ModTime, mf.ModTime); err != nil {
+			// Log warning but don't fail the copy
+			// Modification time is less critical than file content
+		}
 	}
 
 	return CopyOperation{
@@ -422,30 +448,65 @@ func copySingleFile(opts StreamCopyOptions, mfPath string, mf MissingFile) CopyO
 	}
 }
 
-// copyFileContent copies a file from src to dst
+// copyFileContent copies a file from src to dst using atomic write pattern
+// It writes to a temporary file first, then renames to ensure atomicity
 func copyFileContent(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open source file: %w", err)
 	}
 	defer srcFile.Close()
 
 	// Get file info for mode
 	srcInfo, err := srcFile.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get source file info: %w", err)
 	}
 
-	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, srcInfo.Mode())
+	// Create temporary file in the same directory as destination
+	// This ensures the temp file is on the same filesystem for atomic rename
+	dstDir := filepath.Dir(dst)
+	tmpFile, err := os.CreateTemp(dstDir, ".copy-tmp-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer dstFile.Close()
+	tmpPath := tmpFile.Name()
 
-	_, err = dstFile.ReadFrom(srcFile)
+	// Cleanup function to remove temp file on failure
+	cleanupTemp := func() {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+	}
+
+	// Copy content
+	_, err = tmpFile.ReadFrom(srcFile)
 	if err != nil {
-		os.Remove(dst) // Clean up on error
-		return err
+		cleanupTemp()
+		return fmt.Errorf("failed to copy content: %w", err)
+	}
+
+	// Sync to ensure data is written to disk
+	if err := tmpFile.Sync(); err != nil {
+		cleanupTemp()
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+
+	// Set file mode before closing
+	if err := tmpFile.Chmod(srcInfo.Mode()); err != nil {
+		cleanupTemp()
+		return fmt.Errorf("failed to set file mode: %w", err)
+	}
+
+	// Close the temp file before rename
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	// Atomic rename - this is the critical atomic operation
+	if err := os.Rename(tmpPath, dst); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file to destination: %w", err)
 	}
 
 	return nil
