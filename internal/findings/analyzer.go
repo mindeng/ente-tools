@@ -388,16 +388,17 @@ func copySingleFile(opts StreamCopyOptions, mfPath string, mf MissingFile) CopyO
 		}
 	}
 
-	// Check if destination already exists with same size
+	// Check if destination already exists and can be skipped
 	if dstInfo, err := os.Stat(dstPath); err == nil {
-		// If file exists with same size, skip it
-		if dstInfo.Size() == srcInfo.Size() {
+		// Skip if file exists with same size and mtime >= source
+		// This indicates the file was previously copied successfully
+		if dstInfo.Size() == srcInfo.Size() && !dstInfo.ModTime().Before(srcInfo.ModTime()) {
 			return CopyOperation{
 				Path:   mfPath,
 				Status: CopyStatusSkipped,
 			}
 		}
-		// File exists but with different size - will be overwritten
+		// File exists but differs - will be overwritten
 	}
 
 	if opts.DryRun {
@@ -434,12 +435,11 @@ func copySingleFile(opts StreamCopyOptions, mfPath string, mf MissingFile) CopyO
 		}
 	}
 
-	// Set modification time to match source
-	if !mf.ModTime.IsZero() {
-		if err := os.Chtimes(dstPath, mf.ModTime, mf.ModTime); err != nil {
-			// Log warning but don't fail the copy
-			// Modification time is less critical than file content
-		}
+	// Set modification time to match source file
+	// This ensures the skip check works correctly on subsequent runs
+	if err := os.Chtimes(dstPath, srcInfo.ModTime(), srcInfo.ModTime()); err != nil {
+		// Log warning but don't fail the copy
+		// Modification time is less critical than file content
 	}
 
 	return CopyOperation{
